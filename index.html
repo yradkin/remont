@@ -76,6 +76,12 @@ body[data-mode="orbit"] .walkonly,body[data-mode="walk"] .orbitonly{display:none
 .chk{font-size:13px;display:flex;gap:8px;align-items:center}
 .pv{display:flex;flex-direction:column;gap:4px}.pv canvas{width:180px;height:180px;border-radius:10px}
 
+.src[data-ok="2"]::before{background:var(--warn)}
+.need{display:flex;flex-direction:column;gap:4px;background:rgba(210,150,40,.14);border-radius:12px;padding:10px 12px;margin:10px 0 4px;font-size:12.5px}
+.need span{color:var(--txt2)}.need .btn{margin-top:6px;padding:8px 10px;font-size:12.5px;align-self:flex-start}
+.need.ok{background:rgba(47,138,91,.12)}
+.qrbox{display:flex;gap:16px;align-items:center;margin:10px 0}.qr{width:170px;height:170px;flex:none;border-radius:12px}
+.mi .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 /* раскладка */
 .btn.lay{width:100%;margin:2px 0 10px;padding:10px 12px;font-size:13px}
 .mi.lay{max-width:1100px}
@@ -110,11 +116,13 @@ body[data-mode="orbit"] .walkonly,body[data-mode="walk"] .orbitonly{display:none
   <button type="button" class="tb orbitonly" data-act="home">Вся квартира</button>
   <button type="button" class="tb" data-act="shot" title="Сохранить картинку">Снимок</button>
   <button type="button" class="src" id="src" data-act="login" data-ok="0">По эскизу</button>
+  <button type="button" class="src" id="sync" data-act="login" data-ok="0" title="Где хранится ваш проект">Только в этом браузере</button>
 </header>
 <nav class="panel" id="rooms" aria-label="Комнаты"></nav>
 <aside class="panel" id="info" hidden></aside>
 <div class="panel" id="help"><span class="orbitonly"><b>Мышь:</b> левая — вращать, правая — сдвигать, колесо — приблизить. Нажмите комнату внизу.</span><span class="walkonly"><b>Прогулка:</b> W A S D или стрелки — идти, Shift — быстрее, тянуть мышью — осмотреться, колесо — шаг. Комната внизу — перейти в неё.</span></div>
 <script>window.__GEO={"K":7.114,"WALLS":[[1108,180,1136,780],[1136,180,1292,230],[1510,180,1617,230],[1585,230,1617,1637],[355,662,1195,690],[1322,662,1617,690],[397,690,430,750],[643,690,669,780],[1330,690,1347,800,1],[1330,900,1347,990,1],[1259,990,1585,1005,1],[669,914,776,932,1],[962,914,1108,932,1],[643,914,669,1800],[1108,914,1136,1590],[140,887,166,1800],[397,887,430,920],[166,920,472,946,1],[455,1038,472,1128,1],[166,1128,522,1144,1],[140,1590,279,1637],[478,1590,764,1637],[1017,1590,1271,1637],[1475,1590,1617,1637],[166,1637,215,1800]],"WINDOWS":[[279,1590,478,1637,"kit.w1_W"],[764,1590,1017,1637,"r14.w1_W"],[1271,1590,1475,1637,"r13.w1_W"],[1292,180,1510,230,"r10.w1_W"],[215,1792,643,1808,"bal.w1_W"]],"DOORS":[[1195,676,1322,676,"r10.d1_W"],[1338,800,1338,900,"bath.d1_W"],[1136,997,1259,997,"r13.d1_W"],[776,923,962,923,"r14.d1_W"],[463,946,463,1038,"wc.d1_W"],[522,1136,643,1136,"kit.d1_W"],[153,700,153,880,"hall.d1_W"]],"ROOMS":[{"id":"hall","short":"Прихожая","name":"Прихожая 12,97","proj":12.97,"rect":[166,690,1330,914]},{"id":"kit","short":"Кухня","name":"Кухня 10,97","proj":10.97,"rect":[166,1144,643,1590]},{"id":"bal","short":"Лоджия","name":"Лоджия 3,22","proj":3.22,"rect":[215,1637,643,1800]},{"id":"wc","short":"Санузел","name":"Санузел 1,71","proj":1.71,"rect":[166,946,455,1128]},{"id":"bath","short":"Ванная","name":"Ванная 3,04","proj":3.04,"rect":[1347,690,1585,990]},{"id":"r10","short":"Комн. 10,11","name":"Комната 10,11","proj":10.11,"rect":[1136,230,1585,662]},{"id":"r14","short":"Комн. 14,85","name":"Комната 14,85","proj":14.85,"rect":[669,932,1108,1590]},{"id":"r13","short":"Комн. 13,54","name":"Комната 13,54","proj":13.54,"rect":[1136,1005,1585,1590]}]};</script>
+<script src="./qrcode.js"></script>
 <script type="module" src="./app.js"></script>
 </body>
 </html>

@@ -3,12 +3,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { MATS, PAINTS, matFor, swatch, loadLibrary, openImporter, removeUser } from './mats.js';
+import { MATS, PAINTS, matFor, swatch, loadLibrary, openImporter, removeUser, storeRecord } from './mats.js';
 import { openLayout } from './lay.js';
 
 const G = window.__GEO;                        // геометрия из «Обмера» (стены, окна, двери, комнаты)
 const K = G.K;                                 // мм на пиксель плана
-const SYNC_URL = 'https://script.google.com/macros/s/AKfycbxmRZ8en5tzIkbOwHbD_kEpJkf0s3iOJPBJn0fidTg5Z0_C-oWoWlLGt6RUQQVBz4yPdA/exec';
+const SYNC_URL = window.__SYNC || 'https://script.google.com/macros/s/AKfycbxmRZ8en5tzIkbOwHbD_kEpJkf0s3iOJPBJn0fidTg5Z0_C-oWoWlLGt6RUQQVBz4yPdA/exec';
 const $ = s => document.querySelector(s);
 const ls = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) {} } };
 const esc = x => String(x == null ? '' : x).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -73,9 +73,13 @@ const matHandle = new THREE.MeshStandardMaterial({ color: '#c9ccd1', roughness: 
 
 /* ---------- отделка: что выбрано в каждой комнате (хранится в этом браузере) ---------- */
 const P_KEY = 'remont-p1';
-let P = { rooms: {}, doors: {}, lay: {} };
+let P = { rooms: {}, doors: {}, lay: {}, mats: {}, matsDel: [] };
 try { const j = JSON.parse(ls.get(P_KEY) || 'null'); if (j) P = Object.assign(P, j); } catch (e) {}
-const saveP = () => ls.set(P_KEY, JSON.stringify(P));
+function saveP(local) { ls.set(P_KEY, JSON.stringify(P)); if (local) return; SY.dirty = true; ls.set('remont-dirty', '1'); pushSoon(); setSync(); }
+const fixP = () => { ['rooms', 'doors', 'lay', 'mats'].forEach(k => { if (!P[k] || typeof P[k] !== 'object') P[k] = {}; }); if (!Array.isArray(P.matsDel)) P.matsDel = []; };
+fixP();
+const SY = { at: +(ls.get('remont-at') || 0), dirty: ls.get('remont-dirty') === '1', t: 0, busy: false, on: false, err: '' };
+if (!SY.at && (Object.keys(P.rooms).length || Object.keys(P.doors).length || Object.keys(P.lay).length)) SY.dirty = true;
 const WET = rid => rid === 'wc' || rid === 'bath' || rid === 'bal';
 function fin(rid) { return Object.assign({ floor: WET(rid) ? 'tile-600-lgrey' : 'lam-nat', walls: 'paint', wallColor: '#f1ede6', floorColor: '#c9c4bb', ceil: '#fbfaf8' }, P.rooms[rid] || {}); }
 const wallMatOf = rid => { const f = fin(rid), id = MATS.has(f.walls) ? f.walls : 'paint', lo = layOpt(rid, 'walls', id); return matFor(id, f.wallColor, lo && lo.pat); };
@@ -335,6 +339,7 @@ function updateInfo() {
     '<div class="kv"><span>По эскизу</span><b>' + fmt(sw) + ' × ' + fmt(sl) + ' мм</b></div>' +
     (W && L ? '<div class="kv"><span>По замеру</span><b>' + fmt(W) + ' × ' + fmt(L) + ' мм · ' + (W * L / 1e6).toFixed(2).replace('.', ',') + ' м²</b></div>' : '<div class="kv"><span>Площадь по проекту</span><b>' + r.proj.toLocaleString('ru-RU') + ' м²</b></div>') +
     '<div class="kv"><span>Потолок</span><b>' + (c ? fmt(c) + ' мм (замер)' : fmt(H * 1000) + ' мм' + (ceilAll() ? ' (среднее)' : ' (условно)')) + '</b></div>' +
+    (() => { const ms = missing(r.id); return ms.length ? '<div class="need"><b>Не хватает замеров: ' + ms.length + '</b><span>' + esc(ms.slice(0, 4).join(', ')) + (ms.length > 4 ? '…' : '') + '</span><button type="button" class="btn ghost" data-measure="' + r.id + '">Замерить в «Обмере» →</button></div>' : '<div class="need ok"><b>Замеры комнаты полные</b><button type="button" class="btn ghost" data-measure="' + r.id + '">Открыть в «Обмере»</button></div>'; })() +
     '<div class="tabs" role="group">' + [['floor', 'Пол'], ['walls', 'Стены'], ['ceil', 'Потолок'], ['doors', 'Двери']].map(([k, l]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k) + '">' + l + '</button>').join('') + '</div>' +
     (tab === 'floor' ? '<button type="button" class="btn lay" data-lay="floor">Раскладка и расчёт пола →</button><p class="cur">' + esc(fm.name) + '</p>' + grid('floor', f.floor, f.floorColor) + (fm.colorable ? '<p class="sub">Цвет</p>' + colors('floorc', f.floorColor) : '') : '') +
     (tab === 'walls' ? '<button type="button" class="btn lay" data-lay="walls">Раскладка и расчёт стен →</button><p class="cur">' + esc(wm.name) + (wm.colorable ? ' · <span class="dot" style="background:' + f.wallColor + '"></span>' + f.wallColor : '') + '</p>' + grid('walls', f.walls, f.wallColor) + (wm.colorable ? '<p class="sub">Цвет</p>' + colors('walls', f.wallColor) : '') : '') +
@@ -346,7 +351,8 @@ function updateInfo() {
 document.addEventListener('click', e => {
   const del = e.target.closest('[data-delmat]');
   if (del) { e.stopPropagation(); const id = del.dataset.delmat; if (!confirm('Удалить свой образец «' + (MATS.get(id) || {}).name + '»?')) return;
-    removeUser(id).then(() => { Object.values(P.rooms).forEach(o => { if (o.floor === id) delete o.floor; if (o.walls === id) delete o.walls; }); saveP(); build(); }); return; }
+    removeUser(id).then(() => { Object.values(P.rooms).forEach(o => { if (o.floor === id) delete o.floor; if (o.walls === id) delete o.walls; }); delete P.mats[id]; if (!P.matsDel.includes(id)) P.matsDel.push(id); saveP(); build(); if (WEBTOK) api('rimg_del', { mid: id }).catch(() => {}); }); return; }
+  const ms = e.target.closest('[data-measure]'); if (ms) { openMeasure(ms.dataset.measure); return; }
   const ly = e.target.closest('[data-lay]');
   if (ly && SEL) { const rid = SEL, r = G.ROOMS.find(x => x.id === rid), f = fin(rid), sf = surfacesOf(rid); P.lay[rid] = P.lay[rid] || {};
     openLayout({ title: r.name, start: ly.dataset.lay, surf: sf, plan: sf.plan, wallSides: WALL_KEYS, cfg: P.lay[rid],
@@ -360,7 +366,7 @@ document.addEventListener('click', e => {
     else if (f2.dataset.pcolor) { const k = f2.dataset.pcolor; if (k === 'ceil') R.ceil = f2.dataset.c; else if (k === 'floorc') R.floorColor = f2.dataset.c; else R.wallColor = f2.dataset.c; }
     else if (f2.dataset.dtype) { P.doors[f2.dataset.door] = Object.assign(doorCfg(f2.dataset.door), { type: f2.dataset.dtype }); }
     else if (f2.dataset.dcolor) { P.doors[f2.dataset.door] = Object.assign(doorCfg(f2.dataset.door), { color: f2.dataset.dcolor }); }
-    else if (f2.dataset.imp) { const kind = f2.dataset.imp, rid = SEL; openImporter({ cat: kind === 'floor' ? 'floor' : 'wall', onDone: id => { const RR = P.rooms[rid] = P.rooms[rid] || {}; RR[kind === 'floor' ? 'floor' : 'walls'] = id; saveP(); build(); } }); return; }
+    else if (f2.dataset.imp) { const kind = f2.dataset.imp, rid = SEL; openImporter({ cat: kind === 'floor' ? 'floor' : 'wall', onDone: id => { const RR = P.rooms[rid] = P.rooms[rid] || {}; RR[kind === 'floor' ? 'floor' : 'walls'] = id; saveP(); build(); syncMats(); } }); return; }
     saveP(); build(); return;
   }
   const t = e.target.closest('[data-room],[data-mode],[data-act]'); if (!t) return;
@@ -374,7 +380,7 @@ document.addEventListener('click', e => {
   else if (a === 'unsel') { SEL = null; renderChips(); updateInfo(); }
   else if (a === 'login') openLogin();
   else if (a === 'close') closeModal();
-  else if (a === 'logout') { ls.set('obmer-webtok', ''); M.vals = {}; M.src = 'sketch'; loadLocalVals(); build(); closeModal(); }
+  else if (a === 'logout') { ls.set('obmer-webtok', ''); WEBTOK = ''; SY.on = false; setSync(); M.vals = {}; M.src = 'sketch'; loadLocalVals(); build(); closeModal(); }
 });
 
 /* ---------- замеры с сервера «Обмера»: тот же вход через Telegram ---------- */
@@ -386,9 +392,10 @@ async function api(op, data) {
 async function loadServer() {
   if (!WEBTOK) return false;
   try {
-    const h = await api('hello'); const v = {};
+    const h = await api(M.src === 'server' ? 'pull' : 'hello'); const v = {};
     Object.keys(h.rooms || {}).forEach(rid => { v[rid] = (h.rooms[rid] && h.rooms[rid].values) || {}; });
-    M.vals = v; M.src = 'server'; M.me = h.you; build(); return true;
+    const changed = M.src !== 'server' || JSON.stringify(v) !== JSON.stringify(M.vals);
+    M.vals = v; M.src = 'server'; if (h.you) M.me = h.you; if (changed) build(); return true;
   } catch (e) { if (e.code === 'auth') { WEBTOK = ''; ls.set('obmer-webtok', ''); } return false; }
 }
 const WL = { secret: '', code: '', pin: '', bot: '', timer: 0 };
@@ -411,8 +418,107 @@ async function openLogin() {
     '<div class="row"><a class="btn" href="tg://resolve?domain=' + esc(WL.bot) + '&appname=obmer77&startapp=web_' + WL.code + '">Открыть Telegram</a><a class="btn ghost" target="_blank" rel="noopener" href="https://t.me/' + esc(WL.bot) + '/obmer77?startapp=web_' + WL.code + '">Через t.me</a></div><p class="muted">Окно закроется само, когда вход подтвердится.</p>');
   WL.timer = setInterval(async () => {
     try { const r = await api('web_poll', { secret: WL.secret, ua: 'Ремонт · ' + (/Mac/.test(navigator.userAgent) ? 'Mac' : /Windows/.test(navigator.userAgent) ? 'Windows' : 'браузер') });
-      if (r.token) { WEBTOK = r.token; ls.set('obmer-webtok', r.token); closeModal(); await loadServer(); } } catch (e) {}
+      if (r.token) { WEBTOK = r.token; ls.set('obmer-webtok', r.token); closeModal(); await loadServer(); await syncProject(); } } catch (e) {}
   }, 2500);
+}
+
+/* ---------- проект «Ремонта» на сервере «Обмера»: отделка, раскладка и свои образцы на всех устройствах ---------- */
+function setSync() {
+  const el = $('#sync'); if (!el) return;
+  const t = !WEBTOK ? 'Только в этом браузере' : SY.err ? 'Нет связи — сохраню позже' : SY.dirty ? 'Сохраняю…' : SY.busy ? 'Сверяю с «Обмером»…' : 'Сохранено в «Обмере»';
+  el.textContent = t; el.dataset.ok = WEBTOK && !SY.err && !SY.dirty ? '1' : WEBTOK ? '2' : '0';
+}
+function pushSoon() { clearTimeout(SY.t); if (WEBTOK) SY.t = setTimeout(pushProject, 1500); }
+const isObj = x => x && typeof x === 'object' && !Array.isArray(x);
+function mergeDoc(base, mine) {   // сервер + мои несохранённые правки (мои важнее)
+  const out = JSON.parse(JSON.stringify(base || {}));
+  ['rooms', 'doors', 'lay', 'mats'].forEach(k => { out[k] = Object.assign({}, isObj(out[k]) ? out[k] : {}, isObj(mine[k]) ? mine[k] : {}); });
+  out.matsDel = [...new Set([...(out.matsDel || []), ...(mine.matsDel || [])])];
+  out.matsDel.forEach(id => { delete out.mats[id]; });
+  return out;
+}
+async function pushProject(force) {
+  if (!WEBTOK || SY.busy) { if (SY.busy) pushSoon(); return; }
+  SY.busy = true; setSync();
+  try {
+    const r = await api('rput', { doc: P, base: SY.at, force: !!force });
+    SY.at = r.at; ls.set('remont-at', String(r.at)); SY.dirty = false; ls.set('remont-dirty', ''); SY.err = '';
+  } catch (e) {
+    if (e.code === 'conflict') { SY.busy = false; await syncProject(); return; }
+    SY.err = e.code || 'net'; clearTimeout(SY.t); SY.t = setTimeout(pushProject, 10000);
+  }
+  SY.busy = false; setSync();
+}
+async function syncProject() {
+  if (!WEBTOK || SY.busy) return;
+  SY.busy = true; setSync();
+  let changed = false;
+  try {
+    const r = await api('rget', { at: SY.dirty ? 0 : SY.at });
+    if (!r.same && r.doc) {
+      P = SY.dirty ? mergeDoc(r.doc, P) : r.doc; fixP(); changed = true;
+      SY.at = r.at; ls.set('remont-at', String(r.at)); saveP(true);
+    } else if (!r.doc && !r.same) SY.dirty = true;
+    SY.err = ''; SY.on = true;
+  } catch (e) { SY.err = e.code || 'net'; if (e.code === 'auth') { WEBTOK = ''; ls.set('obmer-webtok', ''); } }
+  SY.busy = false;
+  if (changed) build();
+  if (SY.dirty) await pushProject(true); else setSync();
+  syncMats();
+}
+let matsBusy = false, changedM = false;
+async function syncMats() {
+  if (!WEBTOK || matsBusy) return; matsBusy = true;
+  try {
+    // удалённые на другом устройстве
+    for (const id of P.matsDel) if (MATS.has(id)) { await removeUser(id); changedM = true; }
+    // свои образцы, которых ещё нет на сервере
+    for (const m of [...MATS.values()].filter(x => x.user && !P.mats[x.id] && !P.matsDel.includes(x.id))) {
+      const rec = m.rec; if (!rec || !rec.data) continue;
+      await api('rimg_put', { mid: rec.id, data: rec.data });
+      const meta = Object.assign({}, rec); delete meta.data; P.mats[rec.id] = meta; saveP();
+    }
+    // образцы с других устройств
+    const need = Object.keys(P.mats).filter(id => !MATS.has(id));
+    for (let i = 0; i < need.length; i += 4) {
+      const r = await api('rimg_get', { mids: need.slice(i, i + 4) });
+      for (const id of Object.keys(r.imgs || {})) { await storeRecord(Object.assign({}, P.mats[id], { data: r.imgs[id] })); changedM = true; }
+    }
+  } catch (e) {}
+  matsBusy = false;
+  if (changedM) { changedM = false; build(); }
+}
+
+function poll() { if (document.hidden || !WEBTOK) return; loadServer(); if (!SY.dirty) syncProject(); }
+setInterval(poll, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+
+/* ---------- чего не хватает в замерах и переход в «Обмер» ---------- */
+const OBMER_TG = rid => 'https://t.me/obmer77_bot/obmer77?startapp=room_' + rid;
+const OBMER_WEB = rid => 'https://yradkin.github.io/priemka/#room=' + rid;
+function missing(rid) {
+  const m = [], has = k => val(rid, k) != null;
+  if (!has('W')) m.push('ширина комнаты');
+  if (!has('L')) m.push(rid === 'bal' ? 'глубина' : 'длина комнаты');
+  if (!ceilOf(rid)) m.push('высота потолка');
+  if (rid === 'bal' && !has('par')) m.push('высота парапета');
+  const own = q => q[4].split('.')[0] === rid, itOf = q => q[4].split('.')[1].split('_')[0];
+  const ds = G.DOORS.filter(own), ws = G.WINDOWS.filter(own);
+  ds.forEach((q, i) => { const it = itOf(q), n = ds.length > 1 ? ' ' + (i + 1) : ''; if (!has(it + '_W')) m.push('дверь' + n + ': ширина'); if (!has(it + '_H')) m.push('дверь' + n + ': высота'); });
+  ws.forEach((q, i) => { const it = itOf(q), n = ws.length > 1 ? ' ' + (i + 1) : ''; if (!has(it + '_W')) m.push('окно' + n + ': ширина'); if (!has(it + '_S')) m.push('окно' + n + ': подоконник'); if (!has(it + '_Top') && !has(it + '_H')) m.push('окно' + n + ': верх проёма'); });
+  return m;
+}
+function qrSvg(text) {
+  if (typeof qrcode !== 'function') return '';
+  const q = qrcode(0, 'M'); q.addData(text); q.make(); const n = q.getModuleCount(); let d = '';
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (q.isDark(y, x)) d += 'M' + (x + 2) + ' ' + (y + 2) + 'h1v1h-1z';
+  return '<svg viewBox="0 0 ' + (n + 4) + ' ' + (n + 4) + '" class="qr" role="img" aria-label="QR-код"><rect width="' + (n + 4) + '" height="' + (n + 4) + '" fill="#fff"/><path d="' + d + '" fill="#111"/></svg>';
+}
+function openMeasure(rid) {
+  const r = G.ROOMS.find(x => x.id === rid), ms = missing(rid);
+  modal('<h3>Замерить: ' + esc(r.name) + '</h3>' + (ms.length ? '<p>Не хватает: ' + esc(ms.join(', ')) + '.</p>' : '<p>Все размеры для этой комнаты уже есть. Можно уточнить.</p>') +
+    '<div class="qrbox">' + qrSvg(OBMER_TG(rid)) + '<p class="muted">Наведите камеру телефона — откроется «Обмер» в Telegram сразу на этой комнате. Что внесёте там, появится здесь само (раз в 30 секунд или когда вернётесь на вкладку).</p></div>' +
+    '<div class="row"><a class="btn" target="_blank" rel="noopener" href="' + OBMER_TG(rid) + '">Открыть в Telegram</a><a class="btn ghost" target="_blank" rel="noopener" href="' + OBMER_WEB(rid) + '">В браузере</a><button type="button" class="btn ghost" data-act="close">Закрыть</button></div>');
 }
 
 /* ---------- цикл ---------- */
@@ -439,5 +545,7 @@ function tick() {
 loadLocalVals();
 renderChips(); resize(); build(); homeView(false); tick();
 loadLibrary().then(n => { if (n) build(); });
-loadServer();
-window.__app = { scene, camera, setMode, focusRoom: id => focusRoom(G.ROOMS.find(r => r.id === id)), M, build };
+loadServer().then(() => syncProject()); setSync();
+const deep = () => { const m = location.hash.match(/^#room=([a-z0-9_]+)/); const r = m && G.ROOMS.find(x => x.id === m[1]); if (r) focusRoom(r); };
+addEventListener('hashchange', deep); setTimeout(deep, 300);
+window.__app = { scene, camera, setMode, focusRoom: id => focusRoom(G.ROOMS.find(r => r.id === id)), M, build, SY, getP: () => P };

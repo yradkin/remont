@@ -151,6 +151,7 @@ async function register(o) {
   MATS.set(o.id, { id: o.id, name: o.name, cat: o.cat, type: o.type, w: o.w, h: o.h, piece: o.piece, grout: o.grout, groutColor: o.groutColor, img, rough, env, user: true, rec: o });
   [...TEX.keys()].filter(k => k === o.id || k.startsWith(o.id + '#')).forEach(k => TEX.delete(k)); [...MAT.keys()].filter(k => k.startsWith(o.id + '|')).forEach(k => MAT.delete(k)); [...SW.keys()].filter(k => k.startsWith(o.id + '|')).forEach(k => SW.delete(k));
 }
+export async function storeRecord(o) { try { await dbPut(o); } catch (e) {} await register(o); }
 export async function loadLibrary() { const all = await dbAll(); for (const o of all) { try { await register(o); } catch (e) {} } return all.length; }
 export async function removeUser(id) { await dbDel(id); MATS.delete(id); [...TEX.keys()].filter(k => k === id || k.startsWith(id + '#')).forEach(k => TEX.delete(k)); }
 
