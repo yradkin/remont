@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Ремонт · Тип 13</title>
+<meta name="theme-color" content="#d9d4cc">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%231c1f24'/%3E%3Cpath d='M5 19V10l7-5 7 5v9' fill='none' stroke='%23e9d3b0' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+:root{--bg:#d9d4cc;--glass:rgba(255,255,255,.72);--brd:rgba(255,255,255,.9);--txt:#1c1f24;--txt2:rgba(28,31,36,.62);--acc:#1c1f24;--onacc:#fff;--chip:rgba(255,255,255,.55);--ok:#2f8a5b;--warn:#a46a14;--shadow:0 18px 40px -22px rgba(30,30,40,.45)}
+@media (prefers-color-scheme:dark){:root{--bg:#15171b;--glass:rgba(30,33,39,.72);--brd:rgba(255,255,255,.1);--txt:#f2f2f0;--txt2:rgba(242,242,240,.62);--acc:#f2e3c9;--onacc:#1c1f24;--chip:rgba(255,255,255,.07);--ok:#7fd1a2;--warn:#e7bd5c;--shadow:0 18px 40px -22px rgba(0,0,0,.8)}}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font:14px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;overflow:hidden;-webkit-font-smoothing:antialiased}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;outline:none}
+.panel{position:fixed;background:var(--glass);border:1px solid var(--brd);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(22px) saturate(160%);backdrop-filter:blur(22px) saturate(160%);border-radius:18px}
+.top{top:14px;left:14px;right:14px;display:flex;align-items:center;gap:12px;padding:10px 12px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto;min-width:0}
+.brand i{width:34px;height:34px;border-radius:10px;background:#1c1f24;display:grid;place-items:center;flex:none}
+.brand b{display:block;font-size:15px}.brand small{display:block;color:var(--txt2);font-size:12px}
+.seg{display:flex;background:var(--chip);border-radius:12px;padding:3px;gap:2px}
+.seg button,.tb{appearance:none;border:0;background:none;color:var(--txt);font:inherit;font-weight:600;padding:8px 12px;border-radius:9px;cursor:pointer;white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--acc);color:var(--onacc)}
+.tb{background:var(--chip)} .tb[aria-pressed="true"]{outline:2px solid var(--acc);outline-offset:-2px}
+.src{font-size:12px;font-weight:600;padding:8px 12px;border-radius:10px;background:var(--chip);cursor:pointer;border:0;color:var(--txt)}
+.src::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;background:var(--warn);vertical-align:1px}
+.src[data-ok="1"]::before{background:var(--ok)}
+#rooms{bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:6px;padding:8px;max-width:calc(100% - 28px);overflow-x:auto;scrollbar-width:none}
+.chip{appearance:none;border:0;background:var(--chip);color:var(--txt);font:inherit;font-weight:600;padding:9px 13px;border-radius:12px;cursor:pointer;white-space:nowrap}
+.chip[aria-pressed="true"]{background:var(--acc);color:var(--onacc)}
+#info{top:86px;right:14px;width:300px;padding:14px 16px}
+#info .ih{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:15px}
+#info .x{appearance:none;border:0;background:var(--chip);color:var(--txt);width:28px;height:28px;border-radius:8px;font-size:18px;cursor:pointer}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid rgba(128,128,128,.15);font-size:13px}.kv span{color:var(--txt2)}.kv b{text-align:right}
+#help{left:14px;bottom:86px;padding:10px 14px;font-size:12.5px;color:var(--txt2);max-width:330px}
+#help b{color:var(--txt)}
+body[data-mode="orbit"] .walkonly,body[data-mode="walk"] .orbitonly{display:none}
+.modal{position:fixed;inset:0;background:rgba(10,12,16,.45);display:grid;place-items:center;z-index:20;padding:16px}
+.mi{background:var(--glass);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);border:1px solid var(--brd);border-radius:20px;padding:20px;max-width:420px;width:100%;box-shadow:var(--shadow)}
+.mi h3{margin:0 0 8px;font-size:18px}.mi p{margin:8px 0;color:var(--txt2)}.mi .muted{font-size:12.5px}
+.pin{font-size:40px;font-weight:700;letter-spacing:.18em;text-align:center;margin:10px 0;font-variant-numeric:tabular-nums}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.btn{appearance:none;border:0;background:var(--acc);color:var(--onacc);font:inherit;font-weight:700;padding:11px 16px;border-radius:12px;cursor:pointer;text-decoration:none;display:inline-block}
+.btn.ghost{background:var(--chip);color:var(--txt)}
+@media (max-width:760px){#info{top:auto;bottom:80px;left:14px;right:14px;width:auto}#help{display:none}.brand small{display:none}}
+</style>
+<script type="importmap">{"imports":{"three":"./three.module.min.js","three/addons/controls/OrbitControls.js":"./OrbitControls.js","three/addons/environments/RoomEnvironment.js":"./RoomEnvironment.js"}}</script>
+</head>
+<body data-mode="orbit">
+<canvas id="c" tabindex="0"></canvas>
+<header class="panel top">
+  <div class="brand"><i><svg width="18" height="18" viewBox="0 0 24 24"><path d="M4 20V10l8-6 8 6v10" fill="none" stroke="#e9d3b0" stroke-width="2.2" stroke-linejoin="round"/></svg></i><div><b>Ремонт · Тип 13</b><small>Шаг 1 — квартира в 3D по замерам</small></div></div>
+  <div class="seg" role="group" aria-label="Режим"><button type="button" data-mode="orbit" aria-pressed="true">3D-обзор</button><button type="button" data-mode="walk" aria-pressed="false">Прогулка</button></div>
+  <button type="button" class="tb orbitonly" data-act="cut" aria-pressed="false" title="Срезать стены до 1,15 м, чтобы видеть план">Срез стен</button>
+  <button type="button" class="tb orbitonly" data-act="labels" aria-pressed="true">Подписи</button>
+  <button type="button" class="tb orbitonly" data-act="home">Вся квартира</button>
+  <button type="button" class="tb" data-act="shot" title="Сохранить картинку">Снимок</button>
+  <button type="button" class="src" id="src" data-act="login" data-ok="0">По эскизу</button>
+</header>
+<nav class="panel" id="rooms" aria-label="Комнаты"></nav>
+<aside class="panel" id="info" hidden></aside>
+<div class="panel" id="help"><span class="orbitonly"><b>Мышь:</b> левая — вращать, правая — сдвигать, колесо — приблизить. Нажмите комнату внизу.</span><span class="walkonly"><b>Прогулка:</b> W A S D или стрелки — идти, Shift — быстрее, тянуть мышью — осмотреться, колесо — шаг. Комната внизу — перейти в неё.</span></div>
+<script>window.__GEO={"K":7.114,"WALLS":[[1108,180,1136,780],[1136,180,1292,230],[1510,180,1617,230],[1585,230,1617,1637],[355,662,1195,690],[1322,662,1617,690],[397,690,430,750],[643,690,669,780],[1330,690,1347,800,1],[1330,900,1347,990,1],[1259,990,1585,1005,1],[669,914,776,932,1],[962,914,1108,932,1],[643,914,669,1800],[1108,914,1136,1590],[140,887,166,1800],[397,887,430,920],[166,920,472,946,1],[455,1038,472,1128,1],[166,1128,522,1144,1],[140,1590,279,1637],[478,1590,764,1637],[1017,1590,1271,1637],[1475,1590,1617,1637],[166,1637,215,1800]],"WINDOWS":[[279,1590,478,1637,"kit.w1_W"],[764,1590,1017,1637,"r14.w1_W"],[1271,1590,1475,1637,"r13.w1_W"],[1292,180,1510,230,"r10.w1_W"],[215,1792,643,1808,"bal.w1_W"]],"DOORS":[[1195,676,1322,676,"r10.d1_W"],[1338,800,1338,900,"bath.d1_W"],[1136,997,1259,997,"r13.d1_W"],[776,923,962,923,"r14.d1_W"],[463,946,463,1038,"wc.d1_W"],[522,1136,643,1136,"kit.d1_W"],[153,700,153,880,"hall.d1_W"]],"ROOMS":[{"id":"hall","short":"Прихожая","name":"Прихожая 12,97","proj":12.97,"rect":[166,690,1330,914]},{"id":"kit","short":"Кухня","name":"Кухня 10,97","proj":10.97,"rect":[166,1144,643,1590]},{"id":"bal","short":"Лоджия","name":"Лоджия 3,22","proj":3.22,"rect":[215,1637,643,1800]},{"id":"wc","short":"Санузел","name":"Санузел 1,71","proj":1.71,"rect":[166,946,455,1128]},{"id":"bath","short":"Ванная","name":"Ванная 3,04","proj":3.04,"rect":[1347,690,1585,990]},{"id":"r10","short":"Комн. 10,11","name":"Комната 10,11","proj":10.11,"rect":[1136,230,1585,662]},{"id":"r14","short":"Комн. 14,85","name":"Комната 14,85","proj":14.85,"rect":[669,932,1108,1590]},{"id":"r13","short":"Комн. 13,54","name":"Комната 13,54","proj":13.54,"rect":[1136,1005,1585,1590]}]};</script>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

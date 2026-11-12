@@ -1,0 +1,326 @@
+/* «Ремонт · Тип 13» — шаг 1: квартира в 3D по эскизу и замерам «Обмера».
+   Единицы сцены — метры. План «Обмера» нарисован в пикселях: 1 px = K мм. Ось Y плана → ось Z сцены. */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const G = window.__GEO;                        // геометрия из «Обмера» (стены, окна, двери, комнаты)
+const K = G.K;                                 // мм на пиксель плана
+const SYNC_URL = 'https://script.google.com/macros/s/AKfycbxmRZ8en5tzIkbOwHbD_kEpJkf0s3iOJPBJn0fidTg5Z0_C-oWoWlLGt6RUQQVBz4yPdA/exec';
+const $ = s => document.querySelector(s);
+const ls = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) {} } };
+const esc = x => String(x == null ? '' : x).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = n => Math.round(n).toLocaleString('ru-RU');
+
+/* ---------- координаты ---------- */
+let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+G.WALLS.concat(G.WINDOWS).forEach(w => { minX = Math.min(minX, w[0]); minY = Math.min(minY, w[1]); maxX = Math.max(maxX, w[2]); maxY = Math.max(maxY, w[3]); });
+const CX = (minX + maxX) / 2, CY = (minY + maxY) / 2;
+const X = px => (px - CX) * K / 1000;          // пиксели плана → метры сцены
+const Z = py => (py - CY) * K / 1000;
+
+/* ---------- замеры ---------- */
+const M = { vals: {}, src: 'sketch', n: 0 };
+function loadLocalVals() {   // копия замеров, которую «Обмер» хранит в этом же браузере
+  try { const j = JSON.parse(ls.get('priemka-t13') || 'null'); if (j && j.vals) { M.vals = j.vals; M.src = 'local'; } } catch (e) {}
+}
+const val = (rid, k) => { const v = M.vals[rid] && M.vals[rid][k]; return v != null && isFinite(+v) && +v > 0 ? +v : null; };
+function countVals() { let n = 0; Object.values(M.vals).forEach(o => { n += Object.keys(o || {}).length; }); return n; }
+function ceilOf(rid) { const hs = ['h1', 'h2', 'h3', 'h4', 'h5'].map(k => val(rid, k)).filter(Boolean); return hs.length ? hs.reduce((a, b) => a + b, 0) / hs.length : null; }
+function ceilAll() { const hs = G.ROOMS.map(r => ceilOf(r.id)).filter(Boolean); return hs.length ? hs.reduce((a, b) => a + b, 0) / hs.length : null; }
+
+/* ---------- сцена ---------- */
+const canvas = $('#c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.92;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+const BG = { light: new THREE.Color('#d9d4cc'), dark: new THREE.Color('#15171b') };
+const dark = () => matchMedia('(prefers-color-scheme: dark)').matches;
+scene.background = dark() ? BG.dark : BG.light;
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 200);
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI * 0.495; controls.minDistance = 2; controls.maxDistance = 40;
+
+const hemi = new THREE.HemisphereLight('#ffffff', '#8f8577', 0.35); scene.add(hemi);
+const sun = new THREE.DirectionalLight('#fff1dc', 2.8);
+sun.position.set(-7, 12, 9); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02;
+Object.assign(sun.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 1, far: 40 });
+scene.add(sun);
+
+/* ---------- процедурные материалы (настоящие текстуры — на шаге 2) ---------- */
+function canvasTex(w, h, draw, rx, ry) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); t.anisotropy = 8; return t;
+}
+const rnd = (a => () => (a = (a * 16807) % 2147483647) / 2147483647)(7);
+const laminate = canvasTex(1024, 1024, (g, w, h) => {   // дуб: доски 1380×193 мм
+  const rows = 8, bw = h / rows;
+  for (let r = 0; r < rows; r++) {
+    let x = -rnd() * w;
+    while (x < w) {
+      const L = w * 0.72, base = 150 + rnd() * 30;
+      g.fillStyle = `rgb(${base + 40},${base + 8},${base - 32})`; g.fillRect(x, r * bw, L, bw);
+      for (let i = 0; i < 14; i++) { g.strokeStyle = `rgba(90,60,30,${0.05 + rnd() * 0.08})`; g.lineWidth = 1 + rnd() * 2; g.beginPath(); const y = r * bw + rnd() * bw; g.moveTo(x, y); g.bezierCurveTo(x + L * 0.3, y + rnd() * 6 - 3, x + L * 0.6, y + rnd() * 6 - 3, x + L, y + rnd() * 4 - 2); g.stroke(); }
+      g.fillStyle = 'rgba(60,40,20,.35)'; g.fillRect(x, r * bw, 2, bw); x += L;
+    }
+    g.fillStyle = 'rgba(60,40,20,.3)'; g.fillRect(0, r * bw, w, 2);
+  }
+}, 1, 1);
+const tile = canvasTex(512, 512, (g, w, h) => {   // плитка 300×300 с затиркой
+  g.fillStyle = '#d9d6d1'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) { const v = 228 + rnd() * 10; g.fillStyle = `rgb(${v},${v - 2},${v - 6})`; g.fillRect(i * w / 2 + 3, j * h / 2 + 3, w / 2 - 6, h / 2 - 6); }
+}, 1, 1);
+const matWall = new THREE.MeshStandardMaterial({ color: '#ebe6df', roughness: 0.92, envMapIntensity: 0.45 });
+const matWallTop = new THREE.MeshStandardMaterial({ color: '#3b3f46', roughness: 1, envMapIntensity: 0.2 });
+const wallMats = [matWall, matWall, matWallTop, matWall, matWall, matWall];   // верхний торец стены — тёмный, чтобы читался план
+const matFloorBase = new THREE.MeshStandardMaterial({ color: '#bdb5a9', roughness: 1, envMapIntensity: 0.3 });
+const matFrame = new THREE.MeshStandardMaterial({ color: '#fbfbfa', roughness: 0.5 });
+const matSill = new THREE.MeshStandardMaterial({ color: '#f4f2ef', roughness: 0.35 });
+const matGlass = new THREE.MeshPhysicalMaterial({ color: '#cfe3ef', roughness: 0.05, metalness: 0, transmission: 0.9, transparent: true, opacity: 0.35, thickness: 0.01 });
+const matCeil = new THREE.MeshStandardMaterial({ color: '#fbfaf8', roughness: 0.95, side: THREE.DoubleSide, envMapIntensity: 0.6 });
+function floorMat(rid, w, d) {
+  const wet = rid === 'wc' || rid === 'bath' || rid === 'bal';
+  const t = (wet ? tile : laminate).clone(); t.needsUpdate = true;
+  if (wet) t.repeat.set(w / 0.6, d / 0.6); else t.repeat.set(w / 1.38 / 0.72, d / (0.193 * 8));
+  return new THREE.MeshStandardMaterial({ map: t, roughness: wet ? 0.35 : 0.6, metalness: 0, envMapIntensity: 0.4 });
+}
+
+/* ---------- построение ---------- */
+const world = new THREE.Group(); scene.add(world);
+let H = 2.7, WALL_LOW = false;
+const wallMeshes = [], ceilings = [], labels = [], solids = [];   // solids — прямоугольники для столкновений в прогулке
+function box(x1, z1, x2, z2, y1, y2, mat, shadow = true) {
+  const w = Math.abs(x2 - x1), d = Math.abs(z2 - z1), h = y2 - y1;
+  if (w < 0.001 || d < 0.001 || h < 0.001) return null;
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set((x1 + x2) / 2, y1 + h / 2, (z1 + z2) / 2);
+  m.castShadow = shadow; m.receiveShadow = true; world.add(m); return m;
+}
+function doorBand(d) {   // толщина стены у проёма: ищем соседние стены по концам двери
+  const [x1, y1, x2, y2] = d, hor = y1 === y2, T = 4;
+  let a = Infinity, b = -Infinity;
+  G.WALLS.forEach(w => {
+    if (hor) { if (y1 >= w[1] - 1 && y1 <= w[3] + 1 && (Math.abs(w[2] - x1) < T || Math.abs(w[0] - x2) < T || (w[0] <= x1 && w[2] >= x1) || (w[0] <= x2 && w[2] >= x2))) { a = Math.min(a, w[1]); b = Math.max(b, w[3]); } }
+    else { if (x1 >= w[0] - 1 && x1 <= w[2] + 1 && (Math.abs(w[3] - y1) < T || Math.abs(w[1] - y2) < T || (w[1] <= y1 && w[3] >= y1) || (w[1] <= y2 && w[3] >= y2))) { a = Math.min(a, w[0]); b = Math.max(b, w[2]); } }
+  });
+  if (!isFinite(a)) { a = (hor ? y1 : x1) - 8; b = (hor ? y1 : x1) + 8; }
+  return hor ? [x1, a, x2, b] : [a, y1, b, y2];
+}
+function textSprite(t1, t2) {
+  const c = document.createElement('canvas'), g = c.getContext('2d'); c.width = 512; c.height = 160;
+  g.font = '600 54px -apple-system,Segoe UI,Roboto,sans-serif'; g.textAlign = 'center'; g.fillStyle = '#1c1f24'; g.shadowColor = 'rgba(255,255,255,.9)'; g.shadowBlur = 12;
+  g.fillText(t1, 256, 70); g.font = '500 40px -apple-system,Segoe UI,Roboto,sans-serif'; g.fillStyle = '#5a5f66'; g.fillText(t2, 256, 128);
+  const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, depthTest: false, transparent: true })); s.scale.set(1.9, 0.6, 1); s.renderOrder = 10; return s;
+}
+function build() {
+  world.clear(); wallMeshes.length = 0; ceilings.length = 0; labels.length = 0; solids.length = 0;
+  H = (ceilAll() || 2700) / 1000;
+  const top = WALL_LOW ? Math.min(1.15, H) : H;
+  // основание под всей квартирой
+  const base = new THREE.Mesh(new THREE.BoxGeometry(X(maxX) - X(minX) + 0.6, 0.12, Z(maxY) - Z(minY) + 0.6), matFloorBase);
+  base.position.set(0, -0.061, 0); base.receiveShadow = true; world.add(base);
+  // полы комнат
+  G.ROOMS.forEach(r => {
+    const [a, b, c, d] = r.rect, w = X(c) - X(a), dd = Z(d) - Z(b);
+    const f = new THREE.Mesh(new THREE.PlaneGeometry(w, dd), floorMat(r.id, w, dd));
+    f.rotation.x = -Math.PI / 2; f.position.set((X(a) + X(c)) / 2, 0.002, (Z(b) + Z(d)) / 2); f.receiveShadow = true; world.add(f);
+    const rc = (ceilOf(r.id) || H * 1000) / 1000;
+    const cl = new THREE.Mesh(new THREE.PlaneGeometry(w, dd), matCeil); cl.rotation.x = Math.PI / 2; cl.position.set(f.position.x, rc, f.position.z); cl.visible = false; world.add(cl); ceilings.push(cl);
+    const lb = textSprite(r.short, r.proj.toLocaleString('ru-RU') + ' м²'); lb.position.set(f.position.x, top + 0.45, f.position.z); world.add(lb); labels.push(lb);
+  });
+  // стены
+  G.WALLS.forEach(w => {
+    const m = box(X(w[0]), Z(w[1]), X(w[2]), Z(w[3]), 0, top, wallMats); if (m) wallMeshes.push(m);
+    solids.push([X(w[0]), Z(w[1]), X(w[2]), Z(w[3])]);
+  });
+  // окна: подоконная часть, перемычка, рама и стекло
+  G.WINDOWS.forEach(wi => {
+    const [rid, key] = wi[4].split('.'), it = key.split('_')[0];
+    const bal = rid === 'bal';
+    const S = (val(rid, it + '_S') ?? (bal ? val('bal', 'par') ?? 1000 : 850)) / 1000;
+    let T = val(rid, it + '_Top'); if (T == null) { const h = val(rid, it + '_H'); T = h ? S * 1000 + h : (bal ? H * 1000 - 50 : 2400); } T = Math.min(T / 1000, H - 0.02);
+    const x1 = X(wi[0]), z1 = Z(wi[1]), x2 = X(wi[2]), z2 = Z(wi[3]);
+    box(x1, z1, x2, z2, 0, Math.min(S, top), wallMats);
+    if (!WALL_LOW) box(x1, z1, x2, z2, T, H, wallMats);
+    solids.push([x1, z1, x2, z2]);
+    const hor = Math.abs(x2 - x1) > Math.abs(z2 - z1);
+    const cx = (x1 + x2) / 2, cz = (z1 + z2) / 2, t = 0.06;
+    if (S < top) {
+      const gy1 = S, gy2 = Math.min(T, top);
+      if (hor) { box(x1, cz - 0.004, x2, cz + 0.004, gy1, gy2, matGlass, false); [[x1, x1 + t], [x2 - t, x2]].forEach(([a, b]) => box(a, cz - 0.035, b, cz + 0.035, gy1, gy2, matFrame)); box(x1, cz - 0.035, x2, cz + 0.035, gy1, gy1 + t, matFrame); if (gy2 === T) box(x1, cz - 0.035, x2, cz + 0.035, T - t, T, matFrame); if (!bal) box(x1 - 0.03, Math.min(z1, z2) - 0.05, x2 + 0.03, cz, S, S + 0.025, matSill); }
+      else { box(cx - 0.004, z1, cx + 0.004, z2, gy1, gy2, matGlass, false); [[z1, z1 + t], [z2 - t, z2]].forEach(([a, b]) => box(cx - 0.035, a, cx + 0.035, b, gy1, gy2, matFrame)); box(cx - 0.035, z1, cx + 0.035, z2, gy1, gy1 + t, matFrame); }
+    }
+  });
+  // двери: проём и перемычка над ним (полотна — на шаге 2)
+  G.DOORS.forEach(d => {
+    const [rid, key] = d[4].split('.'), it = key.split('_')[0];
+    const dh = Math.min((val(rid, it + '_H') ?? 2100) / 1000, H - 0.05);
+    const b = doorBand(d);
+    if (!WALL_LOW) box(X(b[0]), Z(b[1]), X(b[2]), Z(b[3]), dh, H, wallMats);
+  });
+  // торцы срезанных стен — чуть темнее, чтобы читался план
+  ceilings.forEach(c => { c.visible = MODE === 'walk'; });
+  labels.forEach(l => { l.visible = MODE === 'orbit' && SHOW_LABELS; });
+  updateInfo();
+}
+
+/* ---------- режимы: обзор и прогулка ---------- */
+let MODE = 'orbit', SHOW_LABELS = true, SEL = null;
+const walk = { yaw: 0, pitch: 0, keys: {}, pos: new THREE.Vector3(), eye: 1.6 };
+function roomCenter(r) { const [a, b, c, d] = r.rect; return new THREE.Vector3((X(a) + X(c)) / 2, 0, (Z(b) + Z(d)) / 2); }
+function homeView(animate) {
+  const tgt = new THREE.Vector3(0, 0, 0.3), pos = new THREE.Vector3(5.5, 15.5, 12.5);
+  flyTo(pos, tgt, animate);
+}
+let fly = null;
+function flyTo(pos, tgt, animate = true) {
+  if (!animate) { camera.position.copy(pos); controls.target.copy(tgt); controls.update(); return; }
+  fly = { t: 0, p0: camera.position.clone(), p1: pos.clone(), q0: controls.target.clone(), q1: tgt.clone() };
+}
+function focusRoom(r) {
+  SEL = r.id; updateInfo(); renderChips();
+  if (MODE === 'walk') { const c = roomCenter(r); walk.pos.set(c.x, 0, c.z); return; }
+  const c = roomCenter(r), [a, b, cc, d] = r.rect, size = Math.max(X(cc) - X(a), Z(d) - Z(b));
+  flyTo(new THREE.Vector3(c.x + size * 0.55, size * 1.25 + 2.2, c.z + size * 1.05), c);
+}
+function setMode(m) {
+  MODE = m; document.body.dataset.mode = m;
+  controls.enabled = m === 'orbit';
+  if (m === 'walk') {
+    if (WALL_LOW) { WALL_LOW = false; }
+    const r = G.ROOMS.find(x => x.id === SEL) || G.ROOMS.find(x => x.id === 'r14');
+    const c = roomCenter(r); walk.pos.set(c.x, 0, c.z); walk.yaw = Math.PI; walk.pitch = 0;
+    camera.fov = 70; camera.updateProjectionMatrix(); build();
+  } else { camera.fov = 45; camera.updateProjectionMatrix(); build(); homeView(false); }
+  document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+}
+function blocked(x, z) {
+  const r = 0.22;
+  return solids.some(([a, b, c, d]) => x > Math.min(a, c) - r && x < Math.max(a, c) + r && z > Math.min(b, d) - r && z < Math.max(b, d) + r);
+}
+// управление прогулкой: тянуть мышью — осмотреться; WASD/стрелки — идти; колесо — вперёд/назад
+let drag = null;
+canvas.addEventListener('pointerdown', e => { if (MODE !== 'walk') return; drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', e => { if (!drag) return; walk.yaw -= (e.clientX - drag.x) * 0.0045; walk.pitch = Math.max(-1.2, Math.min(1.2, walk.pitch - (e.clientY - drag.y) * 0.0045)); drag = { x: e.clientX, y: e.clientY }; });
+canvas.addEventListener('pointerup', () => { drag = null; });
+canvas.addEventListener('wheel', e => { if (MODE !== 'walk') return; e.preventDefault(); step(-Math.sign(e.deltaY) * 0.35, 0); }, { passive: false });
+addEventListener('keydown', e => { if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return; walk.keys[e.code] = true; if (e.code === 'Escape') closeModal(); });
+addEventListener('keyup', e => { walk.keys[e.code] = false; });
+function step(fw, sd) {
+  const s = Math.sin(walk.yaw), c = Math.cos(walk.yaw);
+  const dx = -s * fw + c * sd, dz = -c * fw - s * sd;
+  const nx = walk.pos.x + dx, nz = walk.pos.z + dz;
+  if (!blocked(nx, walk.pos.z)) walk.pos.x = nx;
+  if (!blocked(walk.pos.x, nz)) walk.pos.z = nz;
+}
+
+/* ---------- интерфейс ---------- */
+function renderChips() {
+  $('#rooms').innerHTML = G.ROOMS.map(r => '<button type="button" class="chip" data-room="' + r.id + '" aria-pressed="' + (SEL === r.id) + '">' + esc(r.short) + '</button>').join('');
+}
+function updateInfo() {
+  const n = countVals();
+  $('#src').textContent = M.src === 'server' ? 'Замеры из «Обмера» · ' + n : M.src === 'local' ? 'Замеры из этого браузера · ' + n : 'По эскизу — замеры не подключены';
+  $('#src').dataset.ok = M.src === 'sketch' ? '0' : '1';
+  const r = G.ROOMS.find(x => x.id === SEL);
+  if (!r) { $('#info').hidden = true; return; }
+  const W = val(r.id, 'W'), L = val(r.id, 'L'), c = ceilOf(r.id);
+  const [a, b, cc, d] = r.rect;
+  const sw = (cc - a) * K, sl = (d - b) * K;
+  $('#info').hidden = false;
+  $('#info').innerHTML = '<div class="ih"><b>' + esc(r.name) + '</b><button type="button" class="x" data-act="unsel" aria-label="Закрыть">×</button></div>' +
+    '<div class="kv"><span>Площадь по проекту</span><b>' + r.proj.toLocaleString('ru-RU') + ' м²</b></div>' +
+    '<div class="kv"><span>Размеры по эскизу</span><b>' + fmt(sw) + ' × ' + fmt(sl) + ' мм</b></div>' +
+    (W && L ? '<div class="kv"><span>По замеру</span><b>' + fmt(W) + ' × ' + fmt(L) + ' мм · ' + (W * L / 1e6).toFixed(2).replace('.', ',') + ' м²</b></div>' : '') +
+    '<div class="kv"><span>Потолок</span><b>' + (c ? fmt(c) + ' мм (замер)' : fmt(H * 1000) + ' мм' + (ceilAll() ? ' (среднее)' : ' (пока условно)')) + '</b></div>';
+}
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-room],[data-mode],[data-act]'); if (!t) return;
+  if (t.dataset.room) { const r = G.ROOMS.find(x => x.id === t.dataset.room); if (r) focusRoom(r); return; }
+  if (t.dataset.mode) { setMode(t.dataset.mode); return; }
+  const a = t.dataset.act;
+  if (a === 'home') { SEL = null; renderChips(); updateInfo(); if (MODE === 'orbit') homeView(true); }
+  else if (a === 'cut') { WALL_LOW = !WALL_LOW; t.setAttribute('aria-pressed', String(WALL_LOW)); build(); }
+  else if (a === 'labels') { SHOW_LABELS = !SHOW_LABELS; t.setAttribute('aria-pressed', String(SHOW_LABELS)); labels.forEach(l => { l.visible = MODE === 'orbit' && SHOW_LABELS; }); }
+  else if (a === 'shot') { renderer.render(scene, camera); const u = canvas.toDataURL('image/png'); const l = document.createElement('a'); l.href = u; l.download = 'remont-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.png'; l.click(); }
+  else if (a === 'unsel') { SEL = null; renderChips(); updateInfo(); }
+  else if (a === 'login') openLogin();
+  else if (a === 'close') closeModal();
+  else if (a === 'logout') { ls.set('obmer-webtok', ''); M.vals = {}; M.src = 'sketch'; loadLocalVals(); build(); closeModal(); }
+});
+
+/* ---------- замеры с сервера «Обмера»: тот же вход через Telegram ---------- */
+let WEBTOK = ls.get('obmer-webtok') || '';
+async function api(op, data) {
+  const r = await fetch(SYNC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ op, initData: '', token: WEBTOK || undefined }, data || {})) });
+  const j = await r.json(); if (!j.ok) { const e = new Error(j.err || 'fail'); e.code = j.err; throw e; } return j;
+}
+async function loadServer() {
+  if (!WEBTOK) return false;
+  try {
+    const h = await api('hello'); const v = {};
+    Object.keys(h.rooms || {}).forEach(rid => { v[rid] = (h.rooms[rid] && h.rooms[rid].values) || {}; });
+    M.vals = v; M.src = 'server'; M.me = h.you; build(); return true;
+  } catch (e) { if (e.code === 'auth') { WEBTOK = ''; ls.set('obmer-webtok', ''); } return false; }
+}
+const WL = { secret: '', code: '', pin: '', bot: '', timer: 0 };
+const hexOf = buf => Array.from(new Uint8Array(buf)).map(b => ('0' + b.toString(16)).slice(-2)).join('');
+const pinOf = code => ('000' + (parseInt(String(code).slice(0, 8), 16) % 10000)).slice(-4);
+function modal(html) { closeModal(); const m = document.createElement('div'); m.className = 'modal'; m.id = 'modal'; m.innerHTML = '<div class="mi" role="dialog" aria-modal="true">' + html + '</div>'; m.addEventListener('click', e => { if (e.target === m) closeModal(); }); document.body.appendChild(m); }
+function closeModal() { const m = $('#modal'); if (m) m.remove(); clearInterval(WL.timer); WL.timer = 0; }
+async function openLogin() {
+  if (WEBTOK) {
+    modal('<h3>Замеры из «Обмера»</h3><p>Подключено' + (M.me ? ' как <b>' + esc(M.me.name) + '</b>' : '') + '. Размеров: ' + countVals() + '. Модель берёт высоту потолков, окна и двери из ваших замеров.</p><div class="row"><button type="button" class="btn" data-act="close">Готово</button><button type="button" class="btn ghost" data-act="logout">Отключить</button></div>');
+    return;
+  }
+  modal('<h3>Подключить замеры из «Обмера»</h3><p>Готовлю вход…</p>');
+  try {
+    const b = new Uint8Array(32); crypto.getRandomValues(b); WL.secret = hexOf(b);
+    WL.code = hexOf(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(WL.secret))).slice(0, 16); WL.pin = pinOf(WL.code);
+    const r = await api('web_start', { code: WL.code }); WL.bot = r.bot || 'obmer77_bot';
+  } catch (e) { modal('<h3>Нет связи с сервером «Обмера»</h3><p>Проверьте интернет и попробуйте ещё раз.</p><div class="row"><button type="button" class="btn" data-act="login">Повторить</button></div>'); return; }
+  modal('<h3>Подключить замеры из «Обмера»</h3><p>Откройте «Обмер» в Telegram по кнопке и нажмите там «Разрешить вход». Код должен совпасть:</p><div class="pin">' + WL.pin + '</div>' +
+    '<div class="row"><a class="btn" href="tg://resolve?domain=' + esc(WL.bot) + '&appname=obmer77&startapp=web_' + WL.code + '">Открыть Telegram</a><a class="btn ghost" target="_blank" rel="noopener" href="https://t.me/' + esc(WL.bot) + '/obmer77?startapp=web_' + WL.code + '">Через t.me</a></div><p class="muted">Окно закроется само, когда вход подтвердится.</p>');
+  WL.timer = setInterval(async () => {
+    try { const r = await api('web_poll', { secret: WL.secret, ua: 'Ремонт · ' + (/Mac/.test(navigator.userAgent) ? 'Mac' : /Windows/.test(navigator.userAgent) ? 'Windows' : 'браузер') });
+      if (r.token) { WEBTOK = r.token; ls.set('obmer-webtok', r.token); closeModal(); await loadServer(); } } catch (e) {}
+  }, 2500);
+}
+
+/* ---------- цикл ---------- */
+function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { scene.background = dark() ? BG.dark : BG.light; });
+const clock = new THREE.Clock();
+function tick() {
+  const dt = Math.min(0.05, clock.getDelta());
+  if (fly) { fly.t = Math.min(1, fly.t + dt / 0.9); const e = 1 - Math.pow(1 - fly.t, 3); camera.position.lerpVectors(fly.p0, fly.p1, e); controls.target.lerpVectors(fly.q0, fly.q1, e); if (fly.t >= 1) fly = null; }
+  if (MODE === 'walk') {
+    const k = walk.keys, sp = (k.ShiftLeft || k.ShiftRight ? 2.6 : 1.4) * dt;
+    const fw = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0), sd = (k.KeyD ? 1 : 0) - (k.KeyA ? 1 : 0);
+    if (k.ArrowLeft) walk.yaw += 1.8 * dt; if (k.ArrowRight) walk.yaw -= 1.8 * dt;
+    if (fw || sd) step(fw * sp, sd * sp);
+    camera.position.set(walk.pos.x, walk.eye, walk.pos.z);
+    const d = new THREE.Vector3(-Math.sin(walk.yaw) * Math.cos(walk.pitch), Math.sin(walk.pitch), -Math.cos(walk.yaw) * Math.cos(walk.pitch));
+    camera.lookAt(camera.position.clone().add(d));
+  } else controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+
+loadLocalVals();
+renderChips(); resize(); build(); homeView(false); tick();
+loadServer();
+window.__app = { scene, camera, setMode, focusRoom: id => focusRoom(G.ROOMS.find(r => r.id === id)), M, build };
