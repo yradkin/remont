@@ -81,7 +81,15 @@ def('wall-brick', { name: 'Кирпич белый 250×65', cat: 'wall', type: 
 export const PAINTS = ['#f3f0ea', '#e9e3d8', '#d8d2c7', '#c9c4bb', '#b8b2a6', '#8f8a80', '#5c5953', '#2f3133', '#e8dcc8', '#d9c2a6', '#a98c6e', '#7a5a42', '#c9d3c4', '#9aab92', '#5e6f5a', '#c7d3dc', '#8aa0b2', '#3d4f63', '#e9c9bf', '#c88f7f'];
 
 /* ---------- текстуры и материалы ---------- */
-function texFor(d) {
+function texFor(d, pat) {
+  if (pat === 'half' || pat === 'third') {   // ряды со сдвигом: текстура на 2–3 ряда
+    const key = d.id + '#' + pat; if (TEX.has(key)) return TEX.get(key);
+    const base = texFor(d).image, n = pat === 'half' ? 2 : 3, W = base.width, H = base.height;
+    const c = document.createElement('canvas'); c.width = W; c.height = H * n; const g = c.getContext('2d');
+    for (let r = 0; r < n; r++) { const off = Math.round(r * W / n); g.drawImage(base, off, r * H); g.drawImage(base, off - W, r * H); }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+    const p = per(d); t.repeat.set(1000 / p[0], 1000 / (p[1] * n)); TEX.set(key, t); return t;
+  }
   if (TEX.has(d.id)) return TEX.get(d.id);
   let c;
   if (d.img) {   // свой образец: картинка + шов
@@ -94,8 +102,9 @@ function texFor(d) {
     if (d.type === 'tile' && d.grout) groutLines(g, W, H, d.grout * sc, d.groutColor);
   }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = 8; t.repeat.set(1000 / d.w, 1000 / d.h); TEX.set(d.id, t); return t;
+  t.anisotropy = 8; const p = per(d); t.repeat.set(1000 / p[0], 1000 / p[1]); TEX.set(d.id, t); return t;
 }
+const per = d => d.type === 'tile' ? [d.w + (d.grout || 0), d.h + (d.grout || 0)] : [d.w, d.h];   // шаг рисунка с учётом шва
 function groutLines(g, W, H, gw, col) { gw = Math.max(1, gw); g.fillStyle = col || '#bdb8b0'; g.fillRect(0, 0, W, gw / 2); g.fillRect(0, H - gw / 2, W, gw / 2); g.fillRect(0, 0, gw / 2, H); g.fillRect(W - gw / 2, 0, gw / 2, H); }
 function composeTile(img, d) {
   const sc = 1024 / Math.max(d.w, d.h); const W = Math.max(8, Math.round(d.w * sc)), H = Math.max(8, Math.round(d.h * sc));
@@ -103,12 +112,13 @@ function composeTile(img, d) {
   if (d.type === 'tile' && d.grout) groutLines(g, W, H, d.grout * sc, d.groutColor);
   return c;
 }
-export function matFor(id, color) {
+export function matFor(id, color, pat) {
   const d = MATS.get(id) || MATS.get('paint');
-  const key = d.id + '|' + (d.colorable ? color || '' : '');
+  if (d.type !== 'tile' || (pat !== 'half' && pat !== 'third')) pat = '';
+  const key = d.id + '|' + (d.colorable ? color || '' : '') + (pat ? '|' + pat : '');
   if (MAT.has(key)) return MAT.get(key);
   const m = new THREE.MeshStandardMaterial({ roughness: d.rough, metalness: 0, envMapIntensity: d.env });
-  if (d.type !== 'paint') m.map = texFor(d);
+  if (d.type !== 'paint') m.map = texFor(d, pat);
   if (d.colorable) m.color.set(color || '#f1ede6');
   MAT.set(key, m); return m;
 }
@@ -139,10 +149,10 @@ async function register(o) {
   const img = await loadImg(o.data);
   const [rough, env] = GLOSS[o.gloss] || GLOSS.matte;
   MATS.set(o.id, { id: o.id, name: o.name, cat: o.cat, type: o.type, w: o.w, h: o.h, piece: o.piece, grout: o.grout, groutColor: o.groutColor, img, rough, env, user: true, rec: o });
-  TEX.delete(o.id); [...MAT.keys()].filter(k => k.startsWith(o.id + '|')).forEach(k => MAT.delete(k)); [...SW.keys()].filter(k => k.startsWith(o.id + '|')).forEach(k => SW.delete(k));
+  [...TEX.keys()].filter(k => k === o.id || k.startsWith(o.id + '#')).forEach(k => TEX.delete(k)); [...MAT.keys()].filter(k => k.startsWith(o.id + '|')).forEach(k => MAT.delete(k)); [...SW.keys()].filter(k => k.startsWith(o.id + '|')).forEach(k => SW.delete(k));
 }
 export async function loadLibrary() { const all = await dbAll(); for (const o of all) { try { await register(o); } catch (e) {} } return all.length; }
-export async function removeUser(id) { await dbDel(id); MATS.delete(id); TEX.delete(id); }
+export async function removeUser(id) { await dbDel(id); MATS.delete(id); [...TEX.keys()].filter(k => k === id || k.startsWith(id + '#')).forEach(k => TEX.delete(k)); }
 
 /* ---------- выравнивание фото: 4 угла → прямоугольник (проективное преобразование) ---------- */
 function homography(q) {   // единичный квадрат → четырёхугольник q[0..3] (ЛВ, ПВ, ПН, ЛН)

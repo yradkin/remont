@@ -28,8 +28,8 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font:14px/1
 .chip{appearance:none;border:0;background:var(--chip);color:var(--txt);font:inherit;font-weight:600;padding:9px 13px;border-radius:12px;cursor:pointer;white-space:nowrap}
 .chip[aria-pressed="true"]{background:var(--acc);color:var(--onacc)}
 #info{top:86px;right:14px;width:300px;padding:14px 16px}
-#info .ih{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:15px}
-#info .x{appearance:none;border:0;background:var(--chip);color:var(--txt);width:28px;height:28px;border-radius:8px;font-size:18px;cursor:pointer}
+#info .ih,.lay .ih{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:15px}
+#info .x,.lay .x{appearance:none;border:0;background:var(--chip);color:var(--txt);width:28px;height:28px;border-radius:8px;font-size:18px;cursor:pointer}
 .kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid rgba(128,128,128,.15);font-size:13px}.kv span{color:var(--txt2)}.kv b{text-align:right}
 #help{left:14px;bottom:86px;padding:10px 14px;font-size:12.5px;color:var(--txt2);max-width:330px}
 #help b{color:var(--txt)}
@@ -41,7 +41,7 @@ body[data-mode="orbit"] .walkonly,body[data-mode="walk"] .orbitonly{display:none
 .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .btn{appearance:none;border:0;background:var(--acc);color:var(--onacc);font:inherit;font-weight:700;padding:11px 16px;border-radius:12px;cursor:pointer;text-decoration:none;display:inline-block}
 .btn.ghost{background:var(--chip);color:var(--txt)}
-#info{max-height:calc(100vh - 110px);overflow:auto;width:340px}
+#info{max-height:calc(100vh - 186px);overflow:auto;width:340px}
 .tabs,.seg2{display:flex;gap:2px;background:var(--chip);border-radius:11px;padding:3px;margin:12px 0 10px}
 .tabs button,.seg2 button{flex:1;appearance:none;border:0;background:none;color:var(--txt);font:inherit;font-weight:600;font-size:12.5px;padding:7px 4px;border-radius:8px;cursor:pointer}
 .tabs button[aria-pressed="true"],.seg2 button[aria-pressed="true"]{background:var(--acc);color:var(--onacc)}
@@ -75,8 +75,28 @@ body[data-mode="orbit"] .walkonly,body[data-mode="walk"] .orbitonly{display:none
 .f2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}.f2 .f{min-width:0}.f input{width:100%;box-sizing:border-box}
 .chk{font-size:13px;display:flex;gap:8px;align-items:center}
 .pv{display:flex;flex-direction:column;gap:4px}.pv canvas{width:180px;height:180px;border-radius:10px}
-@media (max-width:760px){.impgrid{grid-template-columns:1fr}#info{width:auto}}
-@media (max-width:760px){#info{top:auto;bottom:80px;left:14px;right:14px;width:auto}#help{display:none}.brand small{display:none}}
+
+/* раскладка */
+.btn.lay{width:100%;margin:2px 0 10px;padding:10px 12px;font-size:13px}
+.mi.lay{max-width:1100px}
+.laytop{display:flex;gap:12px;align-items:center}.laytop .seg2{flex:1;flex-wrap:wrap;margin:4px 0}
+#layMini{width:72px;height:72px;flex:none;color:var(--txt)}
+.laystage{min-height:300px;padding:8px;place-items:stretch;background:#fbfaf7}
+#laySvg{width:100%;height:auto;max-height:50vh;touch-action:none;cursor:crosshair;display:block}
+#laySvg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;pointer-events:none}
+#layCtl .f2{margin:6px 0}#layCtl .seg2.mk{flex-wrap:wrap}#layCtl .seg2.mk button{flex:0 0 auto;padding:7px 9px}
+.chk{display:flex;gap:8px;align-items:center;font-size:13px;margin:10px 0}
+.lres{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-top:14px}
+.lres>div{background:var(--chip);border-radius:12px;padding:9px 11px;display:flex;flex-direction:column;gap:2px}
+.lres span{font-size:11.5px;color:var(--txt2);font-weight:600}.lres b{font-size:16px}.lres small{font-size:12px;color:var(--txt2)}
+.lres .big{grid-column:span 2;background:var(--acc);color:var(--onacc)}.lres .big span,.lres .big small{color:inherit;opacity:.75}.lres .big b{font-size:24px}
+.warn{color:var(--warn)!important;font-weight:600;font-size:13px}
+.cuts{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px}
+.cuts>div{display:flex;align-items:center;gap:8px;background:var(--chip);border-radius:10px;padding:6px 9px;font-size:13px}
+.cuts i{font-style:normal;font-weight:800;width:24px;height:24px;border-radius:6px;display:grid;place-items:center;color:#2b2b2b;flex:none}
+.cuts span{flex:1}.cuts.rows{grid-template-columns:1fr;max-height:260px;overflow:auto}.cuts.rows b{color:#b4541c}.lbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+@media (max-width:760px){.laytop{flex-wrap:wrap}.lres .big{grid-column:span 1}.impgrid{grid-template-columns:1fr}#info{width:auto}}
+@media (max-width:760px){#info{top:auto;bottom:80px;left:14px;right:14px;width:auto;max-height:56vh}#help{display:none}.brand small{display:none}}
 </style>
 <script type="importmap">{"imports":{"three":"./three.module.min.js","three/addons/controls/OrbitControls.js":"./OrbitControls.js","three/addons/environments/RoomEnvironment.js":"./RoomEnvironment.js"}}</script>
 </head>

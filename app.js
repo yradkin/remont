@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MATS, PAINTS, matFor, swatch, loadLibrary, openImporter, removeUser } from './mats.js';
+import { openLayout } from './lay.js';
 
 const G = window.__GEO;                        // геометрия из «Обмера» (стены, окна, двери, комнаты)
 const K = G.K;                                 // мм на пиксель плана
@@ -72,12 +73,60 @@ const matHandle = new THREE.MeshStandardMaterial({ color: '#c9ccd1', roughness: 
 
 /* ---------- отделка: что выбрано в каждой комнате (хранится в этом браузере) ---------- */
 const P_KEY = 'remont-p1';
-let P = { rooms: {}, doors: {} };
+let P = { rooms: {}, doors: {}, lay: {} };
 try { const j = JSON.parse(ls.get(P_KEY) || 'null'); if (j) P = Object.assign(P, j); } catch (e) {}
 const saveP = () => ls.set(P_KEY, JSON.stringify(P));
 const WET = rid => rid === 'wc' || rid === 'bath' || rid === 'bal';
 function fin(rid) { return Object.assign({ floor: WET(rid) ? 'tile-600-lgrey' : 'lam-nat', walls: 'paint', wallColor: '#f1ede6', floorColor: '#c9c4bb', ceil: '#fbfaf8' }, P.rooms[rid] || {}); }
-const wallMatOf = rid => { const f = fin(rid); return matFor(MATS.has(f.walls) ? f.walls : 'paint', f.wallColor); };
+const wallMatOf = rid => { const f = fin(rid), id = MATS.has(f.walls) ? f.walls : 'paint', lo = layOpt(rid, 'walls', id); return matFor(id, f.wallColor, lo && lo.pat); };
+/* настройки раскладки, если они сделаны для текущего материала поверхности */
+function layOpt(rid, kind, id) { const L = P.lay && P.lay[rid], o = L && L.opt && L.opt[kind]; return o && o.mat === id ? o : null; }
+
+/* поверхности комнаты в мм для раскладки: пол и 4 стены с проёмами (стена — вид изнутри, y от потолка) */
+const SURF = new Map();
+const WALL_KEYS = { top: 'w0', right: 'w1', bottom: 'w2', left: 'w3' };
+function surfacesOf(rid) {
+  if (SURF.has(rid)) return SURF.get(rid);
+  const r = G.ROOMS.find(x => x.id === rid), [a, b, c, d] = r.rect, sw = (c - a) * K, sl = (d - b) * K;
+  let W = sw, L = sl; const Wm = val(rid, 'W'), Lm = val(rid, 'L');
+  if (Wm && Lm) { if (Math.abs(Wm - sw) + Math.abs(Lm - sl) <= Math.abs(Lm - sw) + Math.abs(Wm - sl)) { W = Wm; L = Lm; } else { W = Lm; L = Wm; } }
+  W = Math.round(W); L = Math.round(L);
+  const kx = W / sw, ky = L / sl, Hc = Math.round(ceilOf(rid) || H * 1000);
+  const ops = [];
+  const add = (q, kind) => {
+    const [orid, key] = q[4].split('.'), it = key.split('_')[0];
+    let f0 = 0, f1;
+    if (kind === 'door') f1 = Math.min(val(orid, it + '_H') ?? 2100, Hc);
+    else { const bal = orid === 'bal', S = val(orid, it + '_S') ?? (bal ? val('bal', 'par') ?? 1000 : 850); let T = val(orid, it + '_Top'); if (T == null) { const h = val(orid, it + '_H'); T = h ? S + h : (bal ? Hc - 50 : 2400); } f0 = S; f1 = Math.min(T, Hc); }
+    ops.push({ x0: Math.min(q[0], q[2]), x1: Math.max(q[0], q[2]), y0: Math.min(q[1], q[3]), y1: Math.max(q[1], q[3]), kind, f0, f1, wm: val(orid, it + '_W') });
+  };
+  G.DOORS.forEach(q => add(q, 'door')); G.WINDOWS.forEach(q => add(q, 'win'));
+  const T = 70, out = { floor: { W, H: L, holes: [], name: 'Пол' }, kx, ky, rect: r.rect, plan: { W, L } };
+  ['top', 'right', 'bottom', 'left'].forEach((side, i) => {
+    const hor = side === 'top' || side === 'bottom', len = hor ? W : L, holes = [];
+    ops.forEach(o => {
+      const oh = o.x1 - o.x0 >= o.y1 - o.y0; if (oh !== hor) return;
+      const near = side === 'top' ? o.y1 >= b - T && o.y0 <= b + 3 : side === 'bottom' ? o.y0 <= d + T && o.y1 >= d - 3 : side === 'left' ? o.x1 >= a - T && o.x0 <= a + 3 : o.x0 <= c + T && o.x1 >= c - 3;
+      const over = hor ? o.x1 > a + 2 && o.x0 < c - 2 : o.y1 > b + 2 && o.y0 < d - 2;
+      if (!near || !over) return;
+      let u0 = side === 'top' ? (o.x0 - a) * K * kx : side === 'bottom' ? (c - o.x1) * K * kx : side === 'left' ? (d - o.y1) * K * ky : (o.y0 - b) * K * ky;
+      let u1 = side === 'top' ? (o.x1 - a) * K * kx : side === 'bottom' ? (c - o.x0) * K * kx : side === 'left' ? (d - o.y0) * K * ky : (o.y1 - b) * K * ky;
+      if (o.wm) { const m = (u0 + u1) / 2; u0 = m - o.wm / 2; u1 = m + o.wm / 2; }
+      u0 = Math.max(0, Math.round(u0)); u1 = Math.min(len, Math.round(u1));
+      if (u1 - u0 > 50) holes.push({ x0: u0, x1: u1, y0: Hc - o.f1, y1: Hc - o.f0, kind: o.kind });
+    });
+    out[WALL_KEYS[side]] = { W: len, H: Hc, holes, name: 'Стена ' + 'АБВГ'[i] };
+  });
+  SURF.set(rid, out); return out;
+}
+/* сдвиг UV стены так, чтобы швы проходили через метку раскладки */
+function wallUVShift(rid, fi) {
+  const f = fin(rid), id = MATS.has(f.walls) ? f.walls : 'paint', lo = layOpt(rid, 'walls', id); if (!lo) return null;
+  const side = ['left', 'right', null, null, 'top', 'bottom'][fi], k = WALL_KEYS[side], mk = P.lay[rid].marks && P.lay[rid].marks[k]; if (!mk) return null;
+  const sf = surfacesOf(rid), [a, b, c, d] = sf.rect, S = sf[k];
+  const uj = side === 'top' ? X(a) + mk.mx / sf.kx / 1000 : side === 'bottom' ? -(X(c) - mk.mx / sf.kx / 1000) : side === 'left' ? -(Z(d) - mk.mx / sf.ky / 1000) : Z(b) + mk.mx / sf.ky / 1000;
+  return { uj, vj: (S.H - mk.my) / 1000, rot: !!lo.rot };
+}
 function doorCfg(key) { return Object.assign({ type: key === 'hall.d1_W' ? 'entry' : 'std', color: key === 'hall.d1_W' ? '#3a3330' : '#f4f2ee' }, P.doors[key] || {}); }
 function roomAt(x, z) { const px = x * 1000 / K + CX, py = z * 1000 / K + CY; const r = G.ROOMS.find(r => px >= r.rect[0] - 1 && px <= r.rect[2] + 1 && py >= r.rect[1] - 1 && py <= r.rect[3] + 1); return r ? r.id : null; }
 function worldUV(geo, cx, cy, cz) {   // UV в метрах по мировым координатам: рисунок непрерывен между соседними кусками стены
@@ -100,7 +149,11 @@ function box(x1, z1, x2, z2, y1, y2, mat, shadow = true) {
   worldUV(geo, cx, cy, cz);
   if (mat === 'WALL') {   // каждая грань стены — в отделке той комнаты, куда она смотрит
     const f = (dx, dz) => { const r = roomAt(cx + dx, cz + dz); return r ? wallMatOf(r) : matWall; };
-    mat = [f(w / 2 + 0.06, 0), f(-w / 2 - 0.06, 0), matWallTop, matWall, f(0, d / 2 + 0.06), f(0, -d / 2 - 0.06)];
+    const off = [[w / 2 + 0.06, 0], [-w / 2 - 0.06, 0], null, null, [0, d / 2 + 0.06], [0, -d / 2 - 0.06]];
+    mat = [f(...off[0]), f(...off[1]), matWallTop, matWall, f(...off[4]), f(...off[5])];
+    const uv = geo.attributes.uv;
+    [0, 1, 4, 5].forEach(fi => { const r = roomAt(cx + off[fi][0], cz + off[fi][1]); const sh = r && wallUVShift(r, fi); if (!sh) return;
+      for (let i = fi * 4; i < fi * 4 + 4; i++) { const u = uv.getX(i) - sh.uj, v = uv.getY(i) - sh.vj; if (sh.rot) uv.setXY(i, v, u); else uv.setXY(i, u, v); } });
   }
   const m = new THREE.Mesh(geo, mat);
   m.position.set(cx, cy, cz);
@@ -144,7 +197,7 @@ function doorLeaf(d, b, rid, dh, top) {
   B(a2 - fw - 0.17, mid - 0.045, a2 - fw - 0.05, mid + 0.045, 0.99, 1.02, matHandle);
 }
 function build() {
-  world.clear(); wallMeshes.length = 0; ceilings.length = 0; labels.length = 0; solids.length = 0;
+  SURF.clear(); world.clear(); wallMeshes.length = 0; ceilings.length = 0; labels.length = 0; solids.length = 0;
   H = (ceilAll() || 2700) / 1000;
   const top = WALL_LOW ? Math.min(1.15, H) : H;
   // основание под всей квартирой
@@ -154,9 +207,10 @@ function build() {
   G.ROOMS.forEach(r => {
     const [a, b, c, d] = r.rect, w = X(c) - X(a), dd = Z(d) - Z(b);
     const fx = (X(a) + X(c)) / 2, fz = (Z(b) + Z(d)) / 2, fg = new THREE.PlaneGeometry(w, dd), fp = fg.attributes.position;
-    for (let i = 0; i < fp.count; i++) fg.attributes.uv.setXY(i, fx + fp.getX(i), -(fz - fp.getY(i)));
-    const ff = fin(r.id);
-    const f = new THREE.Mesh(fg, matFor(MATS.has(ff.floor) ? ff.floor : 'lam-nat', ff.floorColor));
+    const ff = fin(r.id), fid = MATS.has(ff.floor) ? ff.floor : 'lam-nat', lo = layOpt(r.id, 'floor', fid), fmk = lo && P.lay[r.id].marks && P.lay[r.id].marks.floor;
+    let ox = 0, oz = 0; if (fmk) { const sf = surfacesOf(r.id); ox = X(a) + fmk.mx / sf.kx / 1000; oz = Z(b) + fmk.my / sf.ky / 1000; }
+    for (let i = 0; i < fp.count; i++) { const u = fx + fp.getX(i) - ox, v = -(fz - fp.getY(i) - oz); if (fmk && lo.rot) fg.attributes.uv.setXY(i, v, u); else fg.attributes.uv.setXY(i, u, v); }
+    const f = new THREE.Mesh(fg, matFor(fid, ff.floorColor, lo && lo.pat));
     f.rotation.x = -Math.PI / 2; f.position.set(fx, 0.002, fz); f.receiveShadow = true; f.userData.room = r.id; world.add(f);
     const rc = (ceilOf(r.id) || H * 1000) / 1000;
     const cl = new THREE.Mesh(new THREE.PlaneGeometry(w, dd), matFor('paint', ff.ceil)); cl.rotation.x = Math.PI / 2; cl.position.set(f.position.x, rc, f.position.z); cl.visible = false; world.add(cl); ceilings.push(cl);
@@ -282,8 +336,8 @@ function updateInfo() {
     (W && L ? '<div class="kv"><span>По замеру</span><b>' + fmt(W) + ' × ' + fmt(L) + ' мм · ' + (W * L / 1e6).toFixed(2).replace('.', ',') + ' м²</b></div>' : '<div class="kv"><span>Площадь по проекту</span><b>' + r.proj.toLocaleString('ru-RU') + ' м²</b></div>') +
     '<div class="kv"><span>Потолок</span><b>' + (c ? fmt(c) + ' мм (замер)' : fmt(H * 1000) + ' мм' + (ceilAll() ? ' (среднее)' : ' (условно)')) + '</b></div>' +
     '<div class="tabs" role="group">' + [['floor', 'Пол'], ['walls', 'Стены'], ['ceil', 'Потолок'], ['doors', 'Двери']].map(([k, l]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k) + '">' + l + '</button>').join('') + '</div>' +
-    (tab === 'floor' ? '<p class="cur">' + esc(fm.name) + '</p>' + grid('floor', f.floor, f.floorColor) + (fm.colorable ? '<p class="sub">Цвет</p>' + colors('floorc', f.floorColor) : '') : '') +
-    (tab === 'walls' ? '<p class="cur">' + esc(wm.name) + (wm.colorable ? ' · <span class="dot" style="background:' + f.wallColor + '"></span>' + f.wallColor : '') + '</p>' + grid('walls', f.walls, f.wallColor) + (wm.colorable ? '<p class="sub">Цвет</p>' + colors('walls', f.wallColor) : '') : '') +
+    (tab === 'floor' ? '<button type="button" class="btn lay" data-lay="floor">Раскладка и расчёт пола →</button><p class="cur">' + esc(fm.name) + '</p>' + grid('floor', f.floor, f.floorColor) + (fm.colorable ? '<p class="sub">Цвет</p>' + colors('floorc', f.floorColor) : '') : '') +
+    (tab === 'walls' ? '<button type="button" class="btn lay" data-lay="walls">Раскладка и расчёт стен →</button><p class="cur">' + esc(wm.name) + (wm.colorable ? ' · <span class="dot" style="background:' + f.wallColor + '"></span>' + f.wallColor : '') + '</p>' + grid('walls', f.walls, f.wallColor) + (wm.colorable ? '<p class="sub">Цвет</p>' + colors('walls', f.wallColor) : '') : '') +
     (tab === 'ceil' ? '<p class="sub">Цвет потолка</p>' + colors('ceil', f.ceil) + '<p class="muted">Потолок виден в режиме «Прогулка».</p>' : '') +
     (tab === 'doors' ? (doors.length ? doors.map(dd => { const cf = doorCfg(dd[4]), sd = doorSides(dd).filter(Boolean); return '<div class="door"><b>' + esc(sd.length === 2 ? roomName(sd[0]) + ' ↔ ' + roomName(sd[1]) : dd[4] === 'hall.d1_W' ? 'Входная дверь' : 'Дверь ' + roomName(sd[0])) + '</b>' +
       '<div class="seg2">' + DOOR_TYPES.map(([k, l]) => '<button type="button" data-door="' + dd[4] + '" data-dtype="' + k + '" aria-pressed="' + (cf.type === k) + '">' + l + '</button>').join('') + '</div>' +
@@ -293,6 +347,11 @@ document.addEventListener('click', e => {
   const del = e.target.closest('[data-delmat]');
   if (del) { e.stopPropagation(); const id = del.dataset.delmat; if (!confirm('Удалить свой образец «' + (MATS.get(id) || {}).name + '»?')) return;
     removeUser(id).then(() => { Object.values(P.rooms).forEach(o => { if (o.floor === id) delete o.floor; if (o.walls === id) delete o.walls; }); saveP(); build(); }); return; }
+  const ly = e.target.closest('[data-lay]');
+  if (ly && SEL) { const rid = SEL, r = G.ROOMS.find(x => x.id === rid), f = fin(rid), sf = surfacesOf(rid); P.lay[rid] = P.lay[rid] || {};
+    openLayout({ title: r.name, start: ly.dataset.lay, surf: sf, plan: sf.plan, wallSides: WALL_KEYS, cfg: P.lay[rid],
+      mat: { floor: { m: MATS.get(f.floor) || MATS.get('lam-nat') }, walls: { m: MATS.get(f.walls) || MATS.get('paint') } }, save: () => { saveP(); build(); } });
+    return; }
   const f2 = e.target.closest('[data-fin],[data-tab],[data-pcolor],[data-dtype],[data-dcolor],[data-imp]');
   if (f2 && SEL) {
     const R = P.rooms[SEL] = P.rooms[SEL] || {};
