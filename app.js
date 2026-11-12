@@ -164,9 +164,11 @@ function box(x1, z1, x2, z2, y1, y2, mat, shadow = true) {
   m.castShadow = shadow; m.receiveShadow = true; world.add(m); return m;
 }
 function doorBand(d) {   // толщина стены у проёма: ищем соседние стены по концам двери
-  const [x1, y1, x2, y2] = d, hor = y1 === y2, T = 4;
+  const [x1, y1, x2, y2] = d, hor = y1 === y2, T = 10;
   let a = Infinity, b = -Infinity;
   G.WALLS.forEach(w => {
+    const along = hor ? w[2] - w[0] >= w[3] - w[1] : w[3] - w[1] >= w[2] - w[0];   // только стены вдоль двери, а не примыкающие поперёк
+    if (!along) return;
     if (hor) { if (y1 >= w[1] - 1 && y1 <= w[3] + 1 && (Math.abs(w[2] - x1) < T || Math.abs(w[0] - x2) < T || (w[0] <= x1 && w[2] >= x1) || (w[0] <= x2 && w[2] >= x2))) { a = Math.min(a, w[1]); b = Math.max(b, w[3]); } }
     else { if (x1 >= w[0] - 1 && x1 <= w[2] + 1 && (Math.abs(w[3] - y1) < T || Math.abs(w[1] - y2) < T || (w[1] <= y1 && w[3] >= y1) || (w[1] <= y2 && w[3] >= y2))) { a = Math.min(a, w[0]); b = Math.max(b, w[2]); } }
   });
