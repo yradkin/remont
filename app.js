@@ -1,8 +1,9 @@
-/* «Ремонт · Тип 13» — шаг 1: квартира в 3D по эскизу и замерам «Обмера».
+/* «Ремонт · Тип 13» — квартира в 3D по эскизу и замерам «Обмера»; шаг 2 — отделка и двери.
    Единицы сцены — метры. План «Обмера» нарисован в пикселях: 1 px = K мм. Ось Y плана → ось Z сцены. */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { MATS, PAINTS, matFor, swatch, loadLibrary, openImporter, removeUser } from './mats.js';
 
 const G = window.__GEO;                        // геометрия из «Обмера» (стены, окна, двери, комнаты)
 const K = G.K;                                 // мм на пиксель плана
@@ -58,29 +59,6 @@ sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0004; sun.shadow.normal
 Object.assign(sun.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 1, far: 40 });
 scene.add(sun);
 
-/* ---------- процедурные материалы (настоящие текстуры — на шаге 2) ---------- */
-function canvasTex(w, h, draw, rx, ry) {
-  const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d'), w, h);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); t.anisotropy = 8; return t;
-}
-const rnd = (a => () => (a = (a * 16807) % 2147483647) / 2147483647)(7);
-const laminate = canvasTex(1024, 1024, (g, w, h) => {   // дуб: доски 1380×193 мм
-  const rows = 8, bw = h / rows;
-  for (let r = 0; r < rows; r++) {
-    let x = -rnd() * w;
-    while (x < w) {
-      const L = w * 0.72, base = 150 + rnd() * 30;
-      g.fillStyle = `rgb(${base + 40},${base + 8},${base - 32})`; g.fillRect(x, r * bw, L, bw);
-      for (let i = 0; i < 14; i++) { g.strokeStyle = `rgba(90,60,30,${0.05 + rnd() * 0.08})`; g.lineWidth = 1 + rnd() * 2; g.beginPath(); const y = r * bw + rnd() * bw; g.moveTo(x, y); g.bezierCurveTo(x + L * 0.3, y + rnd() * 6 - 3, x + L * 0.6, y + rnd() * 6 - 3, x + L, y + rnd() * 4 - 2); g.stroke(); }
-      g.fillStyle = 'rgba(60,40,20,.35)'; g.fillRect(x, r * bw, 2, bw); x += L;
-    }
-    g.fillStyle = 'rgba(60,40,20,.3)'; g.fillRect(0, r * bw, w, 2);
-  }
-}, 1, 1);
-const tile = canvasTex(512, 512, (g, w, h) => {   // плитка 300×300 с затиркой
-  g.fillStyle = '#d9d6d1'; g.fillRect(0, 0, w, h);
-  for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) { const v = 228 + rnd() * 10; g.fillStyle = `rgb(${v},${v - 2},${v - 6})`; g.fillRect(i * w / 2 + 3, j * h / 2 + 3, w / 2 - 6, h / 2 - 6); }
-}, 1, 1);
 const matWall = new THREE.MeshStandardMaterial({ color: '#ebe6df', roughness: 0.92, envMapIntensity: 0.45 });
 const matWallTop = new THREE.MeshStandardMaterial({ color: '#3b3f46', roughness: 1, envMapIntensity: 0.2 });
 const wallMats = [matWall, matWall, matWallTop, matWall, matWall, matWall];   // верхний торец стены — тёмный, чтобы читался план
@@ -89,11 +67,26 @@ const matFrame = new THREE.MeshStandardMaterial({ color: '#fbfbfa', roughness: 0
 const matSill = new THREE.MeshStandardMaterial({ color: '#f4f2ef', roughness: 0.35 });
 const matGlass = new THREE.MeshPhysicalMaterial({ color: '#cfe3ef', roughness: 0.05, metalness: 0, transmission: 0.9, transparent: true, opacity: 0.35, thickness: 0.01 });
 const matCeil = new THREE.MeshStandardMaterial({ color: '#fbfaf8', roughness: 0.95, side: THREE.DoubleSide, envMapIntensity: 0.6 });
-function floorMat(rid, w, d) {
-  const wet = rid === 'wc' || rid === 'bath' || rid === 'bal';
-  const t = (wet ? tile : laminate).clone(); t.needsUpdate = true;
-  if (wet) t.repeat.set(w / 0.6, d / 0.6); else t.repeat.set(w / 1.38 / 0.72, d / (0.193 * 8));
-  return new THREE.MeshStandardMaterial({ map: t, roughness: wet ? 0.35 : 0.6, metalness: 0, envMapIntensity: 0.4 });
+const matGap = new THREE.MeshStandardMaterial({ color: '#2a2b2e', roughness: 1 });
+const matHandle = new THREE.MeshStandardMaterial({ color: '#c9ccd1', roughness: 0.25, metalness: 0.9 });
+
+/* ---------- отделка: что выбрано в каждой комнате (хранится в этом браузере) ---------- */
+const P_KEY = 'remont-p1';
+let P = { rooms: {}, doors: {} };
+try { const j = JSON.parse(ls.get(P_KEY) || 'null'); if (j) P = Object.assign(P, j); } catch (e) {}
+const saveP = () => ls.set(P_KEY, JSON.stringify(P));
+const WET = rid => rid === 'wc' || rid === 'bath' || rid === 'bal';
+function fin(rid) { return Object.assign({ floor: WET(rid) ? 'tile-600-lgrey' : 'lam-nat', walls: 'paint', wallColor: '#f1ede6', floorColor: '#c9c4bb', ceil: '#fbfaf8' }, P.rooms[rid] || {}); }
+const wallMatOf = rid => { const f = fin(rid); return matFor(MATS.has(f.walls) ? f.walls : 'paint', f.wallColor); };
+function doorCfg(key) { return Object.assign({ type: key === 'hall.d1_W' ? 'entry' : 'std', color: key === 'hall.d1_W' ? '#3a3330' : '#f4f2ee' }, P.doors[key] || {}); }
+function roomAt(x, z) { const px = x * 1000 / K + CX, py = z * 1000 / K + CY; const r = G.ROOMS.find(r => px >= r.rect[0] - 1 && px <= r.rect[2] + 1 && py >= r.rect[1] - 1 && py <= r.rect[3] + 1); return r ? r.id : null; }
+function worldUV(geo, cx, cy, cz) {   // UV в метрах по мировым координатам: рисунок непрерывен между соседними кусками стены
+  const p = geo.attributes.position, n = geo.attributes.normal, uv = geo.attributes.uv;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i) + cx, y = p.getY(i) + cy, z = p.getZ(i) + cz, nx = n.getX(i), nz = n.getZ(i);
+    if (Math.abs(nx) > 0.5) uv.setXY(i, nx > 0 ? -z : z, y); else if (Math.abs(nz) > 0.5) uv.setXY(i, nz > 0 ? x : -x, y); else uv.setXY(i, x, -z);
+  }
+  uv.needsUpdate = true;
 }
 
 /* ---------- построение ---------- */
@@ -103,8 +96,14 @@ const wallMeshes = [], ceilings = [], labels = [], solids = [];   // solids — 
 function box(x1, z1, x2, z2, y1, y2, mat, shadow = true) {
   const w = Math.abs(x2 - x1), d = Math.abs(z2 - z1), h = y2 - y1;
   if (w < 0.001 || d < 0.001 || h < 0.001) return null;
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  m.position.set((x1 + x2) / 2, y1 + h / 2, (z1 + z2) / 2);
+  const cx = (x1 + x2) / 2, cy = y1 + h / 2, cz = (z1 + z2) / 2, geo = new THREE.BoxGeometry(w, h, d);
+  worldUV(geo, cx, cy, cz);
+  if (mat === 'WALL') {   // каждая грань стены — в отделке той комнаты, куда она смотрит
+    const f = (dx, dz) => { const r = roomAt(cx + dx, cz + dz); return r ? wallMatOf(r) : matWall; };
+    mat = [f(w / 2 + 0.06, 0), f(-w / 2 - 0.06, 0), matWallTop, matWall, f(0, d / 2 + 0.06), f(0, -d / 2 - 0.06)];
+  }
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(cx, cy, cz);
   m.castShadow = shadow; m.receiveShadow = true; world.add(m); return m;
 }
 function doorBand(d) {   // толщина стены у проёма: ищем соседние стены по концам двери
@@ -124,6 +123,26 @@ function textSprite(t1, t2) {
   const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace;
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, depthTest: false, transparent: true })); s.scale.set(1.9, 0.6, 1); s.renderOrder = 10; return s;
 }
+/* двери: обычная (коробка, полотно, наличники, ручка), входная, скрытая (заподлицо, в отделке стены), без двери */
+function doorLeaf(d, b, rid, dh, top) {
+  const cfg = doorCfg(d[4]); if (cfg.type === 'none') return;
+  const hor = d[1] === d[3];
+  const a1 = hor ? X(d[0]) : Z(d[1]), a2 = hor ? X(d[2]) : Z(d[3]), c1 = hor ? Z(b[1]) : X(b[0]), c2 = hor ? Z(b[3]) : X(b[2]), mid = (c1 + c2) / 2;
+  const B = (p1, q1, p2, q2, y1, y2, mat, sh = true) => { y2 = Math.min(y2, top); if (y2 - y1 < 0.003) return; return hor ? box(p1, q1, p2, q2, y1, y2, mat, sh) : box(q1, p1, q2, p2, y1, y2, mat, sh); };
+  if (cfg.type === 'hidden') {
+    const am = (a1 + a2) / 2, s1 = hor ? roomAt(am, c1 - 0.06) : roomAt(c1 - 0.06, am);
+    const front = s1 === rid ? c1 : c2, dir = front === c1 ? 1 : -1, wm = wallMatOf(rid);
+    B(a1 + 0.003, Math.min(front, front + dir * 0.04), a2 - 0.003, Math.max(front, front + dir * 0.04), 0.006, dh - 0.003, wm);
+    [[a1, a1 + 0.003], [a2 - 0.003, a2]].forEach(([p, q]) => B(p, Math.min(front, front + dir * 0.03), q, Math.max(front, front + dir * 0.03), 0, dh, matGap, false));
+    B(a1, Math.min(front, front + dir * 0.03), a2, Math.max(front, front + dir * 0.03), dh - 0.003, dh, matGap, false);
+    return;
+  }
+  const leafM = matFor('paint', cfg.color), fw = 0.03, cw = 0.07, ct = 0.012;
+  B(a1, c1, a1 + fw, c2, 0, dh, leafM); B(a2 - fw, c1, a2, c2, 0, dh, leafM); B(a1, c1, a2, c2, dh - fw, dh, leafM);
+  B(a1 + fw + 0.003, mid - 0.02, a2 - fw - 0.003, mid + 0.02, 0.01, dh - fw - 0.003, leafM);
+  [[c1 - ct, c1], [c2, c2 + ct]].forEach(([q1, q2]) => { B(a1 - cw, q1, a1, q2, 0, dh + cw, leafM); B(a2, q1, a2 + cw, q2, 0, dh + cw, leafM); B(a1 - cw, q1, a2 + cw, q2, dh, dh + cw, leafM); });
+  B(a2 - fw - 0.17, mid - 0.045, a2 - fw - 0.05, mid + 0.045, 0.99, 1.02, matHandle);
+}
 function build() {
   world.clear(); wallMeshes.length = 0; ceilings.length = 0; labels.length = 0; solids.length = 0;
   H = (ceilAll() || 2700) / 1000;
@@ -134,15 +153,18 @@ function build() {
   // полы комнат
   G.ROOMS.forEach(r => {
     const [a, b, c, d] = r.rect, w = X(c) - X(a), dd = Z(d) - Z(b);
-    const f = new THREE.Mesh(new THREE.PlaneGeometry(w, dd), floorMat(r.id, w, dd));
-    f.rotation.x = -Math.PI / 2; f.position.set((X(a) + X(c)) / 2, 0.002, (Z(b) + Z(d)) / 2); f.receiveShadow = true; world.add(f);
+    const fx = (X(a) + X(c)) / 2, fz = (Z(b) + Z(d)) / 2, fg = new THREE.PlaneGeometry(w, dd), fp = fg.attributes.position;
+    for (let i = 0; i < fp.count; i++) fg.attributes.uv.setXY(i, fx + fp.getX(i), -(fz - fp.getY(i)));
+    const ff = fin(r.id);
+    const f = new THREE.Mesh(fg, matFor(MATS.has(ff.floor) ? ff.floor : 'lam-nat', ff.floorColor));
+    f.rotation.x = -Math.PI / 2; f.position.set(fx, 0.002, fz); f.receiveShadow = true; f.userData.room = r.id; world.add(f);
     const rc = (ceilOf(r.id) || H * 1000) / 1000;
-    const cl = new THREE.Mesh(new THREE.PlaneGeometry(w, dd), matCeil); cl.rotation.x = Math.PI / 2; cl.position.set(f.position.x, rc, f.position.z); cl.visible = false; world.add(cl); ceilings.push(cl);
+    const cl = new THREE.Mesh(new THREE.PlaneGeometry(w, dd), matFor('paint', ff.ceil)); cl.rotation.x = Math.PI / 2; cl.position.set(f.position.x, rc, f.position.z); cl.visible = false; world.add(cl); ceilings.push(cl);
     const lb = textSprite(r.short, r.proj.toLocaleString('ru-RU') + ' м²'); lb.position.set(f.position.x, top + 0.45, f.position.z); world.add(lb); labels.push(lb);
   });
   // стены
   G.WALLS.forEach(w => {
-    const m = box(X(w[0]), Z(w[1]), X(w[2]), Z(w[3]), 0, top, wallMats); if (m) wallMeshes.push(m);
+    const m = box(X(w[0]), Z(w[1]), X(w[2]), Z(w[3]), 0, top, 'WALL'); if (m) wallMeshes.push(m);
     solids.push([X(w[0]), Z(w[1]), X(w[2]), Z(w[3])]);
   });
   // окна: подоконная часть, перемычка, рама и стекло
@@ -152,8 +174,8 @@ function build() {
     const S = (val(rid, it + '_S') ?? (bal ? val('bal', 'par') ?? 1000 : 850)) / 1000;
     let T = val(rid, it + '_Top'); if (T == null) { const h = val(rid, it + '_H'); T = h ? S * 1000 + h : (bal ? H * 1000 - 50 : 2400); } T = Math.min(T / 1000, H - 0.02);
     const x1 = X(wi[0]), z1 = Z(wi[1]), x2 = X(wi[2]), z2 = Z(wi[3]);
-    box(x1, z1, x2, z2, 0, Math.min(S, top), wallMats);
-    if (!WALL_LOW) box(x1, z1, x2, z2, T, H, wallMats);
+    box(x1, z1, x2, z2, 0, Math.min(S, top), 'WALL');
+    if (!WALL_LOW) box(x1, z1, x2, z2, T, H, 'WALL');
     solids.push([x1, z1, x2, z2]);
     const hor = Math.abs(x2 - x1) > Math.abs(z2 - z1);
     const cx = (x1 + x2) / 2, cz = (z1 + z2) / 2, t = 0.06;
@@ -168,7 +190,8 @@ function build() {
     const [rid, key] = d[4].split('.'), it = key.split('_')[0];
     const dh = Math.min((val(rid, it + '_H') ?? 2100) / 1000, H - 0.05);
     const b = doorBand(d);
-    if (!WALL_LOW) box(X(b[0]), Z(b[1]), X(b[2]), Z(b[3]), dh, H, wallMats);
+    if (!WALL_LOW) box(X(b[0]), Z(b[1]), X(b[2]), Z(b[3]), dh, H, 'WALL');
+    doorLeaf(d, b, rid, dh, top);
   });
   // торцы срезанных стен — чуть темнее, чтобы читался план
   ceilings.forEach(c => { c.visible = MODE === 'walk'; });
@@ -218,6 +241,7 @@ canvas.addEventListener('pointerup', () => { drag = null; });
 canvas.addEventListener('wheel', e => { if (MODE !== 'walk') return; e.preventDefault(); step(-Math.sign(e.deltaY) * 0.35, 0); }, { passive: false });
 addEventListener('keydown', e => { if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return; walk.keys[e.code] = true; if (e.code === 'Escape') closeModal(); });
 addEventListener('keyup', e => { walk.keys[e.code] = false; });
+document.addEventListener('input', e => { const t = e.target; if (!t.dataset.anycolor || !SEL) return; const R = P.rooms[SEL] = P.rooms[SEL] || {}; if (t.dataset.anycolor === 'ceil') R.ceil = t.value; else if (t.dataset.anycolor === 'floorc') R.floorColor = t.value; else R.wallColor = t.value; saveP(); clearTimeout(build.t); build.t = setTimeout(build, 120); });
 function step(fw, sd) {
   const s = Math.sin(walk.yaw), c = Math.cos(walk.yaw);
   const dx = -s * fw + c * sd, dz = -c * fw - s * sd;
@@ -230,23 +254,56 @@ function step(fw, sd) {
 function renderChips() {
   $('#rooms').innerHTML = G.ROOMS.map(r => '<button type="button" class="chip" data-room="' + r.id + '" aria-pressed="' + (SEL === r.id) + '">' + esc(r.short) + '</button>').join('');
 }
+const DOOR_COLORS = [['#f4f2ee', 'Белая'], ['#ece4d6', 'Слоновая кость'], ['#cfccc6', 'Светло-серая'], ['#8b7560', 'Тёплый дуб'], ['#5a4334', 'Орех'], ['#3a3c40', 'Графит'], ['#1d1d1f', 'Чёрная']];
+const DOOR_TYPES = [['std', 'Обычная'], ['hidden', 'Скрытая'], ['entry', 'Входная'], ['none', 'Без двери']];
+function doorSides(d) { const b = doorBand(d), hor = d[1] === d[3], am = hor ? X((d[0] + d[2]) / 2) : Z((d[1] + d[3]) / 2), c1 = hor ? Z(b[1]) : X(b[0]), c2 = hor ? Z(b[3]) : X(b[2]);
+  return [hor ? roomAt(am, c1 - 0.08) : roomAt(c1 - 0.08, am), hor ? roomAt(am, c2 + 0.08) : roomAt(c2 + 0.08, am)]; }
+const roomName = id => (G.ROOMS.find(r => r.id === id) || {}).short || 'коридор';
+function grid(kind, cur, color) {
+  const list = [...MATS.values()].filter(m => kind === 'floor' ? (m.cat === 'floor' || m.cat === 'any') && m.type !== 'paint' : (m.cat === 'wall' || m.cat === 'any'));
+  return '<div class="sw">' + list.map(m => '<button type="button" class="swb' + (m.id === cur ? ' on' : '') + '" data-fin="' + kind + '" data-mat="' + m.id + '" title="' + esc(m.name) + '"><img alt="" src="' + swatch(m.id, m.colorable ? color : '') + '"><span>' + esc(m.name.replace(/^(Ламинат|Керамогранит|Плитка|Обои) · /, '')) + '</span>' + (m.user ? '<i data-delmat="' + m.id + '" title="Удалить образец">×</i>' : '') + '</button>').join('') +
+    '<button type="button" class="swb add" data-imp="' + kind + '"><b>+</b><span>Свой образец</span></button></div>';
+}
+function colors(kind, cur) { return '<div class="pal">' + PAINTS.map(c => '<button type="button" class="pc' + (c === cur ? ' on' : '') + '" style="background:' + c + '" data-pcolor="' + kind + '" data-c="' + c + '" aria-label="' + c + '"></button>').join('') + '<label class="pc any" title="Любой цвет"><input type="color" value="' + esc(cur) + '" data-anycolor="' + kind + '"></label></div>'; }
 function updateInfo() {
   const n = countVals();
   $('#src').textContent = M.src === 'server' ? 'Замеры из «Обмера» · ' + n : M.src === 'local' ? 'Замеры из этого браузера · ' + n : 'По эскизу — замеры не подключены';
   $('#src').dataset.ok = M.src === 'sketch' ? '0' : '1';
   const r = G.ROOMS.find(x => x.id === SEL);
   if (!r) { $('#info').hidden = true; return; }
-  const W = val(r.id, 'W'), L = val(r.id, 'L'), c = ceilOf(r.id);
-  const [a, b, cc, d] = r.rect;
-  const sw = (cc - a) * K, sl = (d - b) * K;
+  const W = val(r.id, 'W'), L = val(r.id, 'L'), c = ceilOf(r.id), f = fin(r.id);
+  const [a, b, cc, d] = r.rect, sw = (cc - a) * K, sl = (d - b) * K;
+  const wm = MATS.get(f.walls) || MATS.get('paint'), fm = MATS.get(f.floor) || MATS.get('lam-nat');
+  const doors = G.DOORS.filter(dd => doorSides(dd).includes(r.id) || dd[4].split('.')[0] === r.id);
+  const tab = $('#info').dataset.tab || 'floor';
   $('#info').hidden = false;
   $('#info').innerHTML = '<div class="ih"><b>' + esc(r.name) + '</b><button type="button" class="x" data-act="unsel" aria-label="Закрыть">×</button></div>' +
-    '<div class="kv"><span>Площадь по проекту</span><b>' + r.proj.toLocaleString('ru-RU') + ' м²</b></div>' +
-    '<div class="kv"><span>Размеры по эскизу</span><b>' + fmt(sw) + ' × ' + fmt(sl) + ' мм</b></div>' +
-    (W && L ? '<div class="kv"><span>По замеру</span><b>' + fmt(W) + ' × ' + fmt(L) + ' мм · ' + (W * L / 1e6).toFixed(2).replace('.', ',') + ' м²</b></div>' : '') +
-    '<div class="kv"><span>Потолок</span><b>' + (c ? fmt(c) + ' мм (замер)' : fmt(H * 1000) + ' мм' + (ceilAll() ? ' (среднее)' : ' (пока условно)')) + '</b></div>';
+    '<div class="kv"><span>По эскизу</span><b>' + fmt(sw) + ' × ' + fmt(sl) + ' мм</b></div>' +
+    (W && L ? '<div class="kv"><span>По замеру</span><b>' + fmt(W) + ' × ' + fmt(L) + ' мм · ' + (W * L / 1e6).toFixed(2).replace('.', ',') + ' м²</b></div>' : '<div class="kv"><span>Площадь по проекту</span><b>' + r.proj.toLocaleString('ru-RU') + ' м²</b></div>') +
+    '<div class="kv"><span>Потолок</span><b>' + (c ? fmt(c) + ' мм (замер)' : fmt(H * 1000) + ' мм' + (ceilAll() ? ' (среднее)' : ' (условно)')) + '</b></div>' +
+    '<div class="tabs" role="group">' + [['floor', 'Пол'], ['walls', 'Стены'], ['ceil', 'Потолок'], ['doors', 'Двери']].map(([k, l]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k) + '">' + l + '</button>').join('') + '</div>' +
+    (tab === 'floor' ? '<p class="cur">' + esc(fm.name) + '</p>' + grid('floor', f.floor, f.floorColor) + (fm.colorable ? '<p class="sub">Цвет</p>' + colors('floorc', f.floorColor) : '') : '') +
+    (tab === 'walls' ? '<p class="cur">' + esc(wm.name) + (wm.colorable ? ' · <span class="dot" style="background:' + f.wallColor + '"></span>' + f.wallColor : '') + '</p>' + grid('walls', f.walls, f.wallColor) + (wm.colorable ? '<p class="sub">Цвет</p>' + colors('walls', f.wallColor) : '') : '') +
+    (tab === 'ceil' ? '<p class="sub">Цвет потолка</p>' + colors('ceil', f.ceil) + '<p class="muted">Потолок виден в режиме «Прогулка».</p>' : '') +
+    (tab === 'doors' ? (doors.length ? doors.map(dd => { const cf = doorCfg(dd[4]), sd = doorSides(dd).filter(Boolean); return '<div class="door"><b>' + esc(sd.length === 2 ? roomName(sd[0]) + ' ↔ ' + roomName(sd[1]) : dd[4] === 'hall.d1_W' ? 'Входная дверь' : 'Дверь ' + roomName(sd[0])) + '</b>' +
+      '<div class="seg2">' + DOOR_TYPES.map(([k, l]) => '<button type="button" data-door="' + dd[4] + '" data-dtype="' + k + '" aria-pressed="' + (cf.type === k) + '">' + l + '</button>').join('') + '</div>' +
+      (cf.type === 'std' || cf.type === 'entry' ? '<div class="pal">' + DOOR_COLORS.map(([c, l]) => '<button type="button" class="pc' + (c === cf.color ? ' on' : '') + '" style="background:' + c + '" data-door="' + dd[4] + '" data-dcolor="' + c + '" title="' + l + '"></button>').join('') + '</div>' : cf.type === 'hidden' ? '<p class="muted">Полотно заподлицо со стеной, в отделке комнаты «' + esc(roomName(dd[4].split('.')[0])) + '».</p>' : '') + '</div>'; }).join('') : '<p class="muted">В этой комнате нет дверных проёмов.</p>') : '');
 }
 document.addEventListener('click', e => {
+  const del = e.target.closest('[data-delmat]');
+  if (del) { e.stopPropagation(); const id = del.dataset.delmat; if (!confirm('Удалить свой образец «' + (MATS.get(id) || {}).name + '»?')) return;
+    removeUser(id).then(() => { Object.values(P.rooms).forEach(o => { if (o.floor === id) delete o.floor; if (o.walls === id) delete o.walls; }); saveP(); build(); }); return; }
+  const f2 = e.target.closest('[data-fin],[data-tab],[data-pcolor],[data-dtype],[data-dcolor],[data-imp]');
+  if (f2 && SEL) {
+    const R = P.rooms[SEL] = P.rooms[SEL] || {};
+    if (f2.dataset.tab) { $('#info').dataset.tab = f2.dataset.tab; updateInfo(); return; }
+    if (f2.dataset.fin) { R[f2.dataset.fin === 'floor' ? 'floor' : 'walls'] = f2.dataset.mat; }
+    else if (f2.dataset.pcolor) { const k = f2.dataset.pcolor; if (k === 'ceil') R.ceil = f2.dataset.c; else if (k === 'floorc') R.floorColor = f2.dataset.c; else R.wallColor = f2.dataset.c; }
+    else if (f2.dataset.dtype) { P.doors[f2.dataset.door] = Object.assign(doorCfg(f2.dataset.door), { type: f2.dataset.dtype }); }
+    else if (f2.dataset.dcolor) { P.doors[f2.dataset.door] = Object.assign(doorCfg(f2.dataset.door), { color: f2.dataset.dcolor }); }
+    else if (f2.dataset.imp) { const kind = f2.dataset.imp, rid = SEL; openImporter({ cat: kind === 'floor' ? 'floor' : 'wall', onDone: id => { const RR = P.rooms[rid] = P.rooms[rid] || {}; RR[kind === 'floor' ? 'floor' : 'walls'] = id; saveP(); build(); } }); return; }
+    saveP(); build(); return;
+  }
   const t = e.target.closest('[data-room],[data-mode],[data-act]'); if (!t) return;
   if (t.dataset.room) { const r = G.ROOMS.find(x => x.id === t.dataset.room); if (r) focusRoom(r); return; }
   if (t.dataset.mode) { setMode(t.dataset.mode); return; }
@@ -316,11 +373,12 @@ function tick() {
     const d = new THREE.Vector3(-Math.sin(walk.yaw) * Math.cos(walk.pitch), Math.sin(walk.pitch), -Math.cos(walk.yaw) * Math.cos(walk.pitch));
     camera.lookAt(camera.position.clone().add(d));
   } else controls.update();
-  renderer.render(scene, camera);
+  if (!window.__pause) renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
 
 loadLocalVals();
 renderChips(); resize(); build(); homeView(false); tick();
+loadLibrary().then(n => { if (n) build(); });
 loadServer();
 window.__app = { scene, camera, setMode, focusRoom: id => focusRoom(G.ROOMS.find(r => r.id === id)), M, build };
