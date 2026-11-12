@@ -104,7 +104,7 @@ body[data-mode="orbit"] .walkonly,body[data-mode="walk"] .orbitonly{display:none
 @media (max-width:760px){.laytop{flex-wrap:wrap}.lres .big{grid-column:span 1}.impgrid{grid-template-columns:1fr}#info{width:auto}}
 @media (max-width:760px){#info{top:auto;bottom:80px;left:14px;right:14px;width:auto;max-height:56vh}#help{display:none}.brand small{display:none}}
 </style>
-<script type="importmap">{"imports":{"three":"./three.module.min.js","three/addons/controls/OrbitControls.js":"./OrbitControls.js","three/addons/environments/RoomEnvironment.js":"./RoomEnvironment.js"}}</script>
+<script type="importmap">{"imports":{"three":"./three.module.min.js","three/addons/controls/OrbitControls.js":"./OrbitControls.js","three/addons/environments/RoomEnvironment.js":"./RoomEnvironment.js","./mats.js":"./mats.js?v=20261112b","./lay.js":"./lay.js?v=20261112b","./laycalc.js":"./laycalc.js?v=20261112b"}}</script>
 </head>
 <body data-mode="orbit">
 <canvas id="c" tabindex="0"></canvas>
@@ -122,7 +122,7 @@ body[data-mode="orbit"] .walkonly,body[data-mode="walk"] .orbitonly{display:none
 <aside class="panel" id="info" hidden></aside>
 <div class="panel" id="help"><span class="orbitonly"><b>Мышь:</b> левая — вращать, правая — сдвигать, колесо — приблизить. Нажмите комнату внизу.</span><span class="walkonly"><b>Прогулка:</b> W A S D или стрелки — идти, Shift — быстрее, тянуть мышью — осмотреться, колесо — шаг. Комната внизу — перейти в неё.</span></div>
 <script>window.__GEO={"K":7.114,"WALLS":[[1108,180,1136,780],[1136,180,1292,230],[1510,180,1617,230],[1585,230,1617,1637],[355,662,1195,690],[1322,662,1617,690],[397,690,430,750],[643,690,669,780],[1330,690,1347,800,1],[1330,900,1347,990,1],[1259,990,1585,1005,1],[669,914,776,932,1],[962,914,1108,932,1],[643,914,669,1800],[1108,914,1136,1590],[140,887,166,1800],[397,887,430,920],[166,920,472,946,1],[455,1038,472,1128,1],[166,1128,522,1144,1],[140,1590,279,1637],[478,1590,764,1637],[1017,1590,1271,1637],[1475,1590,1617,1637],[166,1637,215,1800]],"WINDOWS":[[279,1590,478,1637,"kit.w1_W"],[764,1590,1017,1637,"r14.w1_W"],[1271,1590,1475,1637,"r13.w1_W"],[1292,180,1510,230,"r10.w1_W"],[215,1792,643,1808,"bal.w1_W"]],"DOORS":[[1195,676,1322,676,"r10.d1_W"],[1338,800,1338,900,"bath.d1_W"],[1136,997,1259,997,"r13.d1_W"],[776,923,962,923,"r14.d1_W"],[463,946,463,1038,"wc.d1_W"],[522,1136,643,1136,"kit.d1_W"],[153,700,153,880,"hall.d1_W"]],"ROOMS":[{"id":"hall","short":"Прихожая","name":"Прихожая 12,97","proj":12.97,"rect":[166,690,1330,914]},{"id":"kit","short":"Кухня","name":"Кухня 10,97","proj":10.97,"rect":[166,1144,643,1590]},{"id":"bal","short":"Лоджия","name":"Лоджия 3,22","proj":3.22,"rect":[215,1637,643,1800]},{"id":"wc","short":"Санузел","name":"Санузел 1,71","proj":1.71,"rect":[166,946,455,1128]},{"id":"bath","short":"Ванная","name":"Ванная 3,04","proj":3.04,"rect":[1347,690,1585,990]},{"id":"r10","short":"Комн. 10,11","name":"Комната 10,11","proj":10.11,"rect":[1136,230,1585,662]},{"id":"r14","short":"Комн. 14,85","name":"Комната 14,85","proj":14.85,"rect":[669,932,1108,1590]},{"id":"r13","short":"Комн. 13,54","name":"Комната 13,54","proj":13.54,"rect":[1136,1005,1585,1590]}]};</script>
-<script src="./qrcode.js"></script>
-<script type="module" src="./app.js"></script>
+<script src="./qrcode.js?v=20261112b"></script>
+<script type="module" src="./app.js?v=20261112b"></script>
 </body>
 </html>
