@@ -82,6 +82,36 @@ body[data-mode="orbit"] .walkonly,body[data-mode="walk"] .orbitonly{display:none
 .need.ok{background:rgba(47,138,91,.12)}
 .qrbox{display:flex;gap:16px;align-items:center;margin:10px 0}.qr{width:170px;height:170px;flex:none;border-radius:12px}
 .mi .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+
+/* телефон: компактная шапка, сворачиваемая панель комнаты, джойстик в прогулке */
+.more{display:none}
+#info .fold{display:none}
+#joy,#whint{display:none}
+@media (max-width:760px),(pointer:coarse){
+  body[data-mode="walk"] #joy{display:block;position:fixed;left:22px;bottom:142px;width:128px;height:128px;border-radius:50%;background:rgba(255,255,255,.28);border:1px solid rgba(255,255,255,.7);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);touch-action:none;z-index:5;box-shadow:var(--shadow)}
+  #joy i{position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;border-radius:50%;background:var(--acc);opacity:.85;transition:transform .12s}
+  #joy.on i{transition:none}
+  body[data-mode="walk"] #whint{display:block;left:50%;transform:translateX(-50%);top:76px;padding:8px 12px;font-size:12px;background:var(--acc);color:var(--onacc);border:0;text-align:center;-webkit-backdrop-filter:none;backdrop-filter:none;z-index:7;max-width:calc(100% - 28px);transition:opacity .4s}
+  #whint.off{opacity:0;pointer-events:none}
+}
+@media (max-width:760px){
+  .top{top:10px;left:10px;right:10px;padding:8px;gap:6px}
+  .brand div{display:none}.brand{margin-right:0}
+  .top .seg{flex:1}.top .seg button{flex:1;padding:8px 6px}
+  .more{display:inline-block;font-size:18px;line-height:1;padding:8px 12px}
+  .top .tb:not(.more),.top .src{display:none}
+  body.hdr-open .top .tb:not(.more){display:inline-block}
+  body.hdr-open .top .src{display:inline-block}
+  body.hdr-open[data-mode="walk"] .top .orbitonly{display:none}
+  #info{top:auto;bottom:78px;left:10px;right:10px;width:auto;max-height:58vh;padding:12px 14px}
+  #info .fold{display:grid;place-items:center;appearance:none;border:0;background:var(--chip);color:var(--txt);width:28px;height:28px;border-radius:8px;font-size:14px;cursor:pointer;margin-left:auto;margin-right:6px}
+  #info.folded{overflow:hidden;padding:10px 14px}
+  #info.folded>:not(.ih){display:none}
+  #info.folded .ih{margin:0}
+  #info .ih b{cursor:pointer}
+  body[data-mode="walk"] #info{bottom:78px;z-index:6}
+  #rooms{bottom:10px;max-width:calc(100% - 20px)}
+}
 /* раскладка */
 .btn.lay{width:100%;margin:2px 0 10px;padding:10px 12px;font-size:13px}
 .mi.lay{max-width:1100px}
@@ -104,7 +134,7 @@ body[data-mode="orbit"] .walkonly,body[data-mode="walk"] .orbitonly{display:none
 @media (max-width:760px){.laytop{flex-wrap:wrap}.lres .big{grid-column:span 1}.impgrid{grid-template-columns:1fr}#info{width:auto}}
 @media (max-width:760px){#info{top:auto;bottom:80px;left:14px;right:14px;width:auto;max-height:56vh}#help{display:none}.brand small{display:none}}
 </style>
-<script type="importmap">{"imports":{"three":"./three.module.min.js","three/addons/controls/OrbitControls.js":"./OrbitControls.js","three/addons/environments/RoomEnvironment.js":"./RoomEnvironment.js","./mats.js":"./mats.js?v=20261112b","./lay.js":"./lay.js?v=20261112b","./laycalc.js":"./laycalc.js?v=20261112b"}}</script>
+<script type="importmap">{"imports":{"three":"./three.module.min.js","three/addons/controls/OrbitControls.js":"./OrbitControls.js","three/addons/environments/RoomEnvironment.js":"./RoomEnvironment.js","./mats.js":"./mats.js?v=20261113a","./lay.js":"./lay.js?v=20261113a","./laycalc.js":"./laycalc.js?v=20261113a"}}</script>
 </head>
 <body data-mode="orbit">
 <canvas id="c" tabindex="0"></canvas>
@@ -115,14 +145,17 @@ body[data-mode="orbit"] .walkonly,body[data-mode="walk"] .orbitonly{display:none
   <button type="button" class="tb orbitonly" data-act="labels" aria-pressed="true">Подписи</button>
   <button type="button" class="tb orbitonly" data-act="home">Вся квартира</button>
   <button type="button" class="tb" data-act="shot" title="Сохранить картинку">Снимок</button>
+  <button type="button" class="tb more" data-act="more" aria-label="Ещё" aria-expanded="false">⋯</button>
   <button type="button" class="src" id="src" data-act="login" data-ok="0">По эскизу</button>
   <button type="button" class="src" id="sync" data-act="login" data-ok="0" title="Где хранится ваш проект">Только в этом браузере</button>
 </header>
 <nav class="panel" id="rooms" aria-label="Комнаты"></nav>
 <aside class="panel" id="info" hidden></aside>
+<div id="joy" class="walkonly" aria-hidden="true"><i></i></div>
+<div class="panel walkonly" id="whint">Джойстик — идти · тяните по экрану — осмотреться · коснитесь пола — перейти туда</div>
 <div class="panel" id="help"><span class="orbitonly"><b>Мышь:</b> левая — вращать, правая — сдвигать, колесо — приблизить. Нажмите комнату внизу.</span><span class="walkonly"><b>Прогулка:</b> W A S D или стрелки — идти, Shift — быстрее, тянуть мышью — осмотреться, колесо — шаг. Комната внизу — перейти в неё.</span></div>
 <script>window.__GEO={"K":7.114,"WALLS":[[1108,180,1136,780],[1136,180,1292,230],[1510,180,1617,230],[1585,230,1617,1637],[355,662,1195,690],[1322,662,1617,690],[397,690,430,750],[643,690,669,780],[1330,690,1347,800,1],[1330,900,1347,990,1],[1259,990,1585,1005,1],[669,914,776,932,1],[962,914,1108,932,1],[643,914,669,1800],[1108,914,1136,1590],[140,887,166,1800],[397,887,430,920],[166,920,472,946,1],[455,1038,472,1128,1],[166,1128,522,1144,1],[140,1590,279,1637],[478,1590,764,1637],[1017,1590,1271,1637],[1475,1590,1617,1637],[166,1637,215,1800]],"WINDOWS":[[279,1590,478,1637,"kit.w1_W"],[764,1590,1017,1637,"r14.w1_W"],[1271,1590,1475,1637,"r13.w1_W"],[1292,180,1510,230,"r10.w1_W"],[215,1792,643,1808,"bal.w1_W"]],"DOORS":[[1195,676,1322,676,"r10.d1_W"],[1338,800,1338,900,"bath.d1_W"],[1136,997,1259,997,"r13.d1_W"],[776,923,962,923,"r14.d1_W"],[463,946,463,1038,"wc.d1_W"],[522,1136,643,1136,"kit.d1_W"],[153,700,153,880,"hall.d1_W"]],"ROOMS":[{"id":"hall","short":"Прихожая","name":"Прихожая 12,97","proj":12.97,"rect":[166,690,1330,914]},{"id":"kit","short":"Кухня","name":"Кухня 10,97","proj":10.97,"rect":[166,1144,643,1590]},{"id":"bal","short":"Лоджия","name":"Лоджия 3,22","proj":3.22,"rect":[215,1637,643,1800]},{"id":"wc","short":"Санузел","name":"Санузел 1,71","proj":1.71,"rect":[166,946,455,1128]},{"id":"bath","short":"Ванная","name":"Ванная 3,04","proj":3.04,"rect":[1347,690,1585,990]},{"id":"r10","short":"Комн. 10,11","name":"Комната 10,11","proj":10.11,"rect":[1136,230,1585,662]},{"id":"r14","short":"Комн. 14,85","name":"Комната 14,85","proj":14.85,"rect":[669,932,1108,1590]},{"id":"r13","short":"Комн. 13,54","name":"Комната 13,54","proj":13.54,"rect":[1136,1005,1585,1590]}]};</script>
-<script src="./qrcode.js?v=20261112b"></script>
-<script type="module" src="./app.js?v=20261112b"></script>
+<script src="./qrcode.js?v=20261113a"></script>
+<script type="module" src="./app.js?v=20261113a"></script>
 </body>
 </html>

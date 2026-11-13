@@ -260,7 +260,9 @@ function build() {
 }
 
 /* ---------- режимы: обзор и прогулка ---------- */
-let MODE = 'orbit', SHOW_LABELS = true, SEL = null;
+let MODE = 'orbit', SHOW_LABELS = true, SEL = null, INFO_OPEN = false;
+const MOB = matchMedia('(max-width:760px)');
+const foldInfo = () => { if (MOB.matches && INFO_OPEN) { INFO_OPEN = false; updateInfo(); } document.body.classList.remove('hdr-open'); };
 const walk = { yaw: 0, pitch: 0, keys: {}, pos: new THREE.Vector3(), eye: 1.6 };
 function roomCenter(r) { const [a, b, c, d] = r.rect; return new THREE.Vector3((X(a) + X(c)) / 2, 0, (Z(b) + Z(d)) / 2); }
 function homeView(animate) {
@@ -273,7 +275,7 @@ function flyTo(pos, tgt, animate = true) {
   fly = { t: 0, p0: camera.position.clone(), p1: pos.clone(), q0: controls.target.clone(), q1: tgt.clone() };
 }
 function focusRoom(r) {
-  SEL = r.id; updateInfo(); renderChips();
+  if (SEL !== r.id) INFO_OPEN = !MOB.matches; SEL = r.id; updateInfo(); renderChips();
   if (MODE === 'walk') { const c = roomCenter(r); walk.pos.set(c.x, 0, c.z); return; }
   const c = roomCenter(r), [a, b, cc, d] = r.rect, size = Math.max(X(cc) - X(a), Z(d) - Z(b));
   flyTo(new THREE.Vector3(c.x + size * 0.55, size * 1.25 + 2.2, c.z + size * 1.05), c);
@@ -285,7 +287,8 @@ function setMode(m) {
     if (WALL_LOW) { WALL_LOW = false; }
     const r = G.ROOMS.find(x => x.id === SEL) || G.ROOMS.find(x => x.id === 'r14');
     const c = roomCenter(r); walk.pos.set(c.x, 0, c.z); walk.yaw = Math.PI; walk.pitch = 0;
-    camera.fov = 70; camera.updateProjectionMatrix(); build();
+    camera.fov = 70; camera.updateProjectionMatrix(); INFO_OPEN = false; build();
+    const wh = $('#whint'); wh.classList.remove('off'); clearTimeout(setMode.t); setMode.t = setTimeout(() => wh.classList.add('off'), 10000);
   } else { camera.fov = 45; camera.updateProjectionMatrix(); build(); homeView(false); }
   document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
 }
@@ -295,9 +298,27 @@ function blocked(x, z) {
 }
 // управление прогулкой: тянуть мышью — осмотреться; WASD/стрелки — идти; колесо — вперёд/назад
 let drag = null;
-canvas.addEventListener('pointerdown', e => { if (MODE !== 'walk') return; drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointerdown', e => { foldInfo(); if (MODE !== 'walk') return; $('#whint').classList.add('off'); drag = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t: performance.now() }; walk.goal = null; canvas.setPointerCapture(e.pointerId); });
 canvas.addEventListener('pointermove', e => { if (!drag) return; walk.yaw -= (e.clientX - drag.x) * 0.0045; walk.pitch = Math.max(-1.2, Math.min(1.2, walk.pitch - (e.clientY - drag.y) * 0.0045)); drag = { x: e.clientX, y: e.clientY }; });
-canvas.addEventListener('pointerup', () => { drag = null; });
+canvas.addEventListener('pointerup', e => {
+  if (drag && MODE === 'walk' && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 8 && performance.now() - drag.t < 350) {   // короткое касание пола — идти туда
+    const rc = new THREE.Raycaster(), v = new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); rc.setFromCamera(v, camera);
+    const hit = rc.intersectObjects(world.children, false).filter(h => h.object.visible && !h.object.isSprite)[0];
+    if (hit) {   // пол — идти в эту точку; стена или окно — подойти к ней
+      const g = new THREE.Vector3(hit.point.x, 0, hit.point.z);
+      if (!(hit.point.y < 0.05)) { const dx = g.x - walk.pos.x, dz = g.z - walk.pos.z, d = Math.hypot(dx, dz) || 1, back = Math.min(0.5, d); g.x -= dx / d * back; g.z -= dz / d * back; }
+      walk.goal = g;
+    }
+  }
+  drag = null;
+});
+// джойстик на телефоне
+const joy = $('#joy'), knob = joy.querySelector('i'); walk.joy = { x: 0, y: 0 };
+const joyMove = e => { const r = joy.getBoundingClientRect(), R = r.width / 2 - 14; let dx = e.clientX - r.left - r.width / 2, dy = e.clientY - r.top - r.height / 2; const m = Math.hypot(dx, dy); if (m > R) { dx *= R / m; dy *= R / m; } walk.joy = { x: dx / R, y: dy / R }; knob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)'; };
+joy.addEventListener('pointerdown', e => { e.preventDefault(); $('#whint').classList.add('off'); joy.setPointerCapture(e.pointerId); joy.classList.add('on'); walk.goal = null; foldInfo(); joyMove(e); });
+joy.addEventListener('pointermove', e => { if (joy.classList.contains('on')) joyMove(e); });
+const joyEnd = () => { joy.classList.remove('on'); walk.joy = { x: 0, y: 0 }; knob.style.transform = ''; };
+joy.addEventListener('pointerup', joyEnd); joy.addEventListener('pointercancel', joyEnd);
 canvas.addEventListener('wheel', e => { if (MODE !== 'walk') return; e.preventDefault(); step(-Math.sign(e.deltaY) * 0.35, 0); }, { passive: false });
 addEventListener('keydown', e => { if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return; walk.keys[e.code] = true; if (e.code === 'Escape') closeModal(); });
 addEventListener('keyup', e => { walk.keys[e.code] = false; });
@@ -337,7 +358,8 @@ function updateInfo() {
   const doors = G.DOORS.filter(dd => doorSides(dd).includes(r.id) || dd[4].split('.')[0] === r.id);
   const tab = $('#info').dataset.tab || 'floor';
   $('#info').hidden = false;
-  $('#info').innerHTML = '<div class="ih"><b>' + esc(r.name) + '</b><button type="button" class="x" data-act="unsel" aria-label="Закрыть">×</button></div>' +
+  $('#info').classList.toggle('folded', MOB.matches && !INFO_OPEN);
+  $('#info').innerHTML = '<div class="ih"><b data-act="fold">' + esc(r.name) + '</b><button type="button" class="fold" data-act="fold" aria-label="' + (INFO_OPEN ? 'Свернуть' : 'Развернуть') + '">' + (INFO_OPEN ? '▾' : '▴') + '</button><button type="button" class="x" data-act="unsel" aria-label="Закрыть">×</button></div>' +
     '<div class="kv"><span>По эскизу</span><b>' + fmt(sw) + ' × ' + fmt(sl) + ' мм</b></div>' +
     (W && L ? '<div class="kv"><span>По замеру</span><b>' + fmt(W) + ' × ' + fmt(L) + ' мм · ' + (W * L / 1e6).toFixed(2).replace('.', ',') + ' м²</b></div>' : '<div class="kv"><span>Площадь по проекту</span><b>' + r.proj.toLocaleString('ru-RU') + ' м²</b></div>') +
     '<div class="kv"><span>Потолок</span><b>' + (c ? fmt(c) + ' мм (замер)' : fmt(H * 1000) + ' мм' + (ceilAll() ? ' (среднее)' : ' (условно)')) + '</b></div>' +
@@ -379,7 +401,9 @@ document.addEventListener('click', e => {
   else if (a === 'cut') { WALL_LOW = !WALL_LOW; t.setAttribute('aria-pressed', String(WALL_LOW)); build(); }
   else if (a === 'labels') { SHOW_LABELS = !SHOW_LABELS; t.setAttribute('aria-pressed', String(SHOW_LABELS)); labels.forEach(l => { l.visible = MODE === 'orbit' && SHOW_LABELS; }); }
   else if (a === 'shot') { renderer.render(scene, camera); const u = canvas.toDataURL('image/png'); const l = document.createElement('a'); l.href = u; l.download = 'remont-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.png'; l.click(); }
-  else if (a === 'unsel') { SEL = null; renderChips(); updateInfo(); }
+  else if (a === 'unsel') { SEL = null; INFO_OPEN = false; renderChips(); updateInfo(); }
+  else if (a === 'fold') { INFO_OPEN = !INFO_OPEN; updateInfo(); }
+  else if (a === 'more') { const o = document.body.classList.toggle('hdr-open'); t.setAttribute('aria-expanded', String(o)); }
   else if (a === 'login') openLogin();
   else if (a === 'close') closeModal();
   else if (a === 'logout') { ls.set('obmer-webtok', ''); WEBTOK = ''; SY.on = false; setSync(); M.vals = {}; M.src = 'sketch'; loadLocalVals(); build(); closeModal(); }
@@ -536,6 +560,8 @@ function tick() {
     const fw = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0), sd = (k.KeyD ? 1 : 0) - (k.KeyA ? 1 : 0);
     if (k.ArrowLeft) walk.yaw += 1.8 * dt; if (k.ArrowRight) walk.yaw -= 1.8 * dt;
     if (fw || sd) step(fw * sp, sd * sp);
+    const J = walk.joy; if (J && (J.x || J.y)) { const m = Math.min(1, Math.hypot(J.x, J.y)), s1 = 1.6 * dt * m; step(-J.y / (m || 1) * s1 * (Math.abs(J.y) > 0.15 ? 1 : 0), J.x / (m || 1) * s1 * 0.8 * (Math.abs(J.x) > 0.15 ? 1 : 0)); }
+    if (walk.goal) { const dx = walk.goal.x - walk.pos.x, dz = walk.goal.z - walk.pos.z, d = Math.hypot(dx, dz); if (d < 0.08) walk.goal = null; else { const s2 = Math.min(d, 1.5 * dt), ox = walk.pos.x, oz = walk.pos.z, nx = ox + dx / d * s2, nz = oz + dz / d * s2; if (!blocked(nx, oz)) walk.pos.x = nx; if (!blocked(walk.pos.x, nz)) walk.pos.z = nz; if (walk.pos.x === ox && walk.pos.z === oz) walk.goal = null; } }
     camera.position.set(walk.pos.x, walk.eye, walk.pos.z);
     const d = new THREE.Vector3(-Math.sin(walk.yaw) * Math.cos(walk.pitch), Math.sin(walk.pitch), -Math.cos(walk.yaw) * Math.cos(walk.pitch));
     camera.lookAt(camera.position.clone().add(d));
@@ -550,4 +576,4 @@ loadLibrary().then(n => { if (n) build(); });
 loadServer().then(() => syncProject()); setSync();
 const deep = () => { const m = location.hash.match(/^#room=([a-z0-9_]+)/); const r = m && G.ROOMS.find(x => x.id === m[1]); if (r) focusRoom(r); };
 addEventListener('hashchange', deep); setTimeout(deep, 300);
-window.__app = { scene, camera, setMode, focusRoom: id => focusRoom(G.ROOMS.find(r => r.id === id)), M, build, SY, getP: () => P };
+window.__app = { walk, scene, camera, setMode, focusRoom: id => focusRoom(G.ROOMS.find(r => r.id === id)), M, build, SY, getP: () => P };
