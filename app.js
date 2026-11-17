@@ -87,12 +87,16 @@ const wallMatOf = rid => { const f = fin(rid), id = MATS.has(f.walls) ? f.walls 
 function layOpt(rid, kind, id) { const L = P.lay && P.lay[rid], o = L && L.opt && L.opt[kind]; return o && o.mat === id ? o : null; }
 
 /* поверхности комнаты в мм для раскладки: пол и 4 стены с проёмами (стена — вид изнутри, y от потолка) */
+/* техпаспорт БТИ (05.11.2026): размеры по умолчанию, пока нет своего замера */
+const BTI_H = 2630;
+const BTI = { kit: { W: 3445, L: 3175 }, bal: { W: 3050, L: 1050 }, bath: { W: 1750, L: 2060 }, r10: { W: 3235, L: 3130 }, r14: { W: 3140, L: 4735 }, r13: { W: 3240, L: 4175 } };
+const BTI_AREA = { hall: 12.9, kit: 10.9, bal: 2.2, wc: 1.5, bath: 3.0, r10: 10.1, r14: 14.9, r13: 13.5 };
 const SURF = new Map();
 const WALL_KEYS = { top: 'w0', right: 'w1', bottom: 'w2', left: 'w3' };
 function surfacesOf(rid) {
   if (SURF.has(rid)) return SURF.get(rid);
   const r = G.ROOMS.find(x => x.id === rid), [a, b, c, d] = r.rect, sw = (c - a) * K, sl = (d - b) * K;
-  let W = sw, L = sl; const Wm = val(rid, 'W'), Lm = val(rid, 'L');
+  let W = sw, L = sl; const Wm = val(rid, 'W') ?? (BTI[rid] && BTI[rid].W), Lm = val(rid, 'L') ?? (BTI[rid] && BTI[rid].L);
   if (Wm && Lm) { if (Math.abs(Wm - sw) + Math.abs(Lm - sl) <= Math.abs(Lm - sw) + Math.abs(Wm - sl)) { W = Wm; L = Lm; } else { W = Lm; L = Wm; } }
   W = Math.round(W); L = Math.round(L);
   const kx = W / sw, ky = L / sl, Hc = Math.round(ceilOf(rid) || H * 1000);
@@ -204,7 +208,7 @@ function doorLeaf(d, b, rid, dh, top) {
 }
 function build() {
   SURF.clear(); world.clear(); wallMeshes.length = 0; ceilings.length = 0; labels.length = 0; solids.length = 0;
-  H = (ceilAll() || 2700) / 1000;
+  H = (ceilAll() || BTI_H) / 1000;
   const top = WALL_LOW ? Math.min(1.15, H) : H;
   // основание под всей квартирой
   const base = new THREE.Mesh(new THREE.BoxGeometry(X(maxX) - X(minX) + 0.6, 0.12, Z(maxY) - Z(minY) + 0.6), matFloorBase);
@@ -348,7 +352,7 @@ function grid(kind, cur, color) {
 function colors(kind, cur) { return '<div class="pal">' + PAINTS.map(c => '<button type="button" class="pc' + (c === cur ? ' on' : '') + '" style="background:' + c + '" data-pcolor="' + kind + '" data-c="' + c + '" aria-label="' + c + '"></button>').join('') + '<label class="pc any" title="Любой цвет"><input type="color" value="' + esc(cur) + '" data-anycolor="' + kind + '"></label></div>'; }
 function updateInfo() {
   const n = countVals();
-  $('#src').textContent = M.src === 'server' ? 'Замеры из «Обмера» · ' + n : M.src === 'local' ? 'Замеры из этого браузера · ' + n : 'По эскизу — замеры не подключены';
+  $('#src').textContent = M.src === 'server' ? 'Замеры из «Обмера» · ' + n : M.src === 'local' ? 'Замеры из этого браузера · ' + n : 'По техпаспорту БТИ — свои замеры не подключены';
   $('#src').dataset.ok = M.src === 'sketch' ? '0' : '1';
   const r = G.ROOMS.find(x => x.id === SEL);
   if (!r) { $('#info').hidden = true; return; }
@@ -360,9 +364,11 @@ function updateInfo() {
   $('#info').hidden = false;
   $('#info').classList.toggle('folded', MOB.matches && !INFO_OPEN);
   $('#info').innerHTML = '<div class="ih"><b data-act="fold">' + esc(r.name) + '</b><button type="button" class="fold" data-act="fold" aria-label="' + (INFO_OPEN ? 'Свернуть' : 'Развернуть') + '">' + (INFO_OPEN ? '▾' : '▴') + '</button><button type="button" class="x" data-act="unsel" aria-label="Закрыть">×</button></div>' +
-    '<div class="kv"><span>По эскизу</span><b>' + fmt(sw) + ' × ' + fmt(sl) + ' мм</b></div>' +
-    (W && L ? '<div class="kv"><span>По замеру</span><b>' + fmt(W) + ' × ' + fmt(L) + ' мм · ' + (W * L / 1e6).toFixed(2).replace('.', ',') + ' м²</b></div>' : '<div class="kv"><span>Площадь по проекту</span><b>' + r.proj.toLocaleString('ru-RU') + ' м²</b></div>') +
-    '<div class="kv"><span>Потолок</span><b>' + (c ? fmt(c) + ' мм (замер)' : fmt(H * 1000) + ' мм' + (ceilAll() ? ' (среднее)' : ' (условно)')) + '</b></div>' +
+    (!(W && L) && !BTI[r.id] ? '<div class="kv"><span>По эскизу</span><b>' + fmt(sw) + ' × ' + fmt(sl) + ' мм</b></div>' : '') +
+    (W && L ? '<div class="kv"><span>По замеру</span><b>' + fmt(W) + ' × ' + fmt(L) + ' мм · ' + (W * L / 1e6).toFixed(2).replace('.', ',') + ' м²</b></div>' : '') +
+    (BTI[r.id] && !(W && L) ? '<div class="kv"><span>По БТИ</span><b>' + fmt(BTI[r.id].W) + ' × ' + fmt(BTI[r.id].L) + ' мм</b></div>' : '') +
+    '<div class="kv"><span>Площадь по БТИ</span><b>' + (BTI_AREA[r.id] ?? r.proj).toLocaleString('ru-RU', { minimumFractionDigits: 1 }) + ' м²</b></div>' +
+    '<div class="kv"><span>Потолок</span><b>' + (c ? fmt(c) + ' мм (замер)' : fmt(H * 1000) + ' мм' + (ceilAll() ? ' (среднее по замерам)' : ' (БТИ)')) + '</b></div>' +
     (() => { const ms = missing(r.id); return ms.length ? '<div class="need"><b>Не хватает замеров: ' + ms.length + '</b><span>' + esc(ms.slice(0, 4).join(', ')) + (ms.length > 4 ? '…' : '') + '</span><button type="button" class="btn ghost" data-measure="' + r.id + '">Замерить в «Обмере» →</button></div>' : '<div class="need ok"><b>Замеры комнаты полные</b><button type="button" class="btn ghost" data-measure="' + r.id + '">Открыть в «Обмере»</button></div>'; })() +
     '<div class="tabs" role="group">' + [['floor', 'Пол'], ['walls', 'Стены'], ['ceil', 'Потолок'], ['doors', 'Двери']].map(([k, l]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k) + '">' + l + '</button>').join('') + '</div>' +
     (tab === 'floor' ? '<button type="button" class="btn lay" data-lay="floor">Раскладка и расчёт пола →</button><p class="cur">' + esc(fm.name) + '</p>' + grid('floor', f.floor, f.floorColor) + (fm.colorable ? '<p class="sub">Цвет</p>' + colors('floorc', f.floorColor) : '') : '') +
