@@ -208,7 +208,7 @@ export function openImporter({ cat, onDone }) {
    <h3>Свой образец из магазина</h3>
    <p class="muted">Сохраните картинку товара с сайта и выберите файл, перетащите его сюда или скопируйте картинку и нажмите ⌘V / Ctrl+V. Потом потяните 4 угла точно по краям образца и укажите его реальный размер.</p>
    <div class="impgrid">
-    <div class="stage" id="impStage"><div class="drop" id="impDrop">Перетащите картинку сюда<br><label class="btn">Выбрать файл<input type="file" accept="image/*" id="impFile" hidden></label></div><canvas id="impCv" hidden></canvas></div>
+    <div class="stage" id="impStage"><div class="drop" id="impDrop">Перетащите картинку сюда<br><label class="btn">Выбрать файл<input type="file" accept="image/*" id="impFile" hidden></label> <label class="btn ghost camonly">Сфотографировать<input type="file" accept="image/*" capture="environment" id="impCam" hidden></label></div><canvas id="impCv" hidden></canvas></div>
     <div class="fields">
      <label class="f">Название<input id="impName" placeholder="Например, Керамогранит Estima 60×60"></label>
      <label class="f">Что это<select id="impType">${Object.entries(TYPES).map(([k, t]) => `<option value="${k}">${t.n}</option>`).join('')}</select></label>
@@ -262,6 +262,7 @@ export function openImporter({ cat, onDone }) {
     } catch (e) { alert('Не получилось открыть картинку. Сохраните её файлом (JPG или PNG) и выберите снова.'); }
   }
   $('#impFile').addEventListener('change', e => { const f = e.target.files[0]; if (f) setImage(f); });
+  $('#impCam').addEventListener('change', e => { const f = e.target.files[0]; if (f) setImage(f); });
   $('#impStage').addEventListener('dragover', e => { e.preventDefault(); });
   $('#impStage').addEventListener('drop', e => { e.preventDefault(); const f = [...(e.dataTransfer.files || [])].find(x => /^image\//.test(x.type)); if (f) setImage(f); else alert('Перетащите сам файл картинки. Если тянете прямо с сайта — сначала сохраните картинку или скопируйте её и нажмите ⌘V.'); });
   const onPaste = e => { const it = [...(e.clipboardData && e.clipboardData.items || [])].find(x => /^image\//.test(x.type)); if (it) { e.preventDefault(); setImage(it.getAsFile()); } };

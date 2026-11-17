@@ -5,9 +5,18 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MATS, PAINTS, matFor, swatch, loadLibrary, openImporter, removeUser, storeRecord } from './mats.js';
 import { openLayout } from './lay.js';
+import { CATS, CATALOG, FIN, defOf, recOf, makeItem, findAct, toggle, setAct, stepActs, allActs, thumb } from './furn.js';
+import { renderPhoto } from './photo.js';
 
 const G = window.__GEO;                        // геометрия из «Обмера» (стены, окна, двери, комнаты)
 const K = G.K;                                 // мм на пиксель плана
+/* Геометрия по техпаспорту БТИ: координаты плана пересчитываются так, чтобы комнаты получили размеры БТИ (стены — как на эскизе). */
+{ const b = G.ROOMS.find(r => r.id === 'bath'); if (b && b.rect[3] === 990) { b.rect[3] = 974; G.WALLS.push([1347, 974, 1585, 990, 1]); } }
+const pw = pts => v => { let i = 0; while (i < pts.length - 2 && v > pts[i + 1][0]) i++; const [a, fa] = pts[i], [b, fb] = pts[i + 1]; if (v < pts[0][0]) return pts[0][1] + (v - pts[0][0]) * K; if (v > pts[pts.length - 1][0]) return pts[pts.length - 1][1] + (v - pts[pts.length - 1][0]) * K; return fa + (v - a) * (fb - fa) / (b - a); };
+const inv = pts => { const q = pts.map(([a, b]) => [b, a]); const f = pw(q); return v => v < q[0][0] ? q[0][1] + (v - q[0][0]) / K : v > q[q.length - 1][0] ? q[q.length - 1][1] + (v - q[q.length - 1][0]) / K : f(v); };
+const BX = [[166, -3630], [215, -3235], [643, -185], [669, 0], [1108, 3140], [1136, 3339], [1347, 4829], [1585, 6579]];
+const BY = [[230, -9795], [662, -6665], [690, -6466], [914, -4863], [932, -4735], [990, -4282], [1005, -4175], [1144, -3175], [1590, 0], [1637, 360], [1800, 1410]];
+const MX = pw(BX), MZ = pw(BY), IX = inv(BX), IZ = inv(BY);   // px плана ↔ мм
 const SYNC_URL = window.__SYNC || 'https://script.google.com/macros/s/AKfycbxmRZ8en5tzIkbOwHbD_kEpJkf0s3iOJPBJn0fidTg5Z0_C-oWoWlLGt6RUQQVBz4yPdA/exec';
 const $ = s => document.querySelector(s);
 const ls = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) {} } };
@@ -18,8 +27,8 @@ const fmt = n => Math.round(n).toLocaleString('ru-RU');
 let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
 G.WALLS.concat(G.WINDOWS).forEach(w => { minX = Math.min(minX, w[0]); minY = Math.min(minY, w[1]); maxX = Math.max(maxX, w[2]); maxY = Math.max(maxY, w[3]); });
 const CX = (minX + maxX) / 2, CY = (minY + maxY) / 2;
-const X = px => (px - CX) * K / 1000;          // пиксели плана → метры сцены
-const Z = py => (py - CY) * K / 1000;
+const X = px => (MX(px) - MX(CX)) / 1000;      // пиксели плана → метры сцены
+const Z = py => (MZ(py) - MZ(CY)) / 1000;
 
 /* ---------- замеры ---------- */
 const M = { vals: {}, src: 'sketch', n: 0 };
@@ -76,7 +85,7 @@ const P_KEY = 'remont-p1';
 let P = { rooms: {}, doors: {}, lay: {}, mats: {}, matsDel: [] };
 try { const j = JSON.parse(ls.get(P_KEY) || 'null'); if (j) P = Object.assign(P, j); } catch (e) {}
 function saveP(local) { ls.set(P_KEY, JSON.stringify(P)); if (local) return; SY.dirty = true; ls.set('remont-dirty', '1'); pushSoon(); setSync(); }
-const fixP = () => { ['rooms', 'doors', 'lay', 'mats'].forEach(k => { if (!P[k] || typeof P[k] !== 'object') P[k] = {}; }); if (!Array.isArray(P.matsDel)) P.matsDel = []; };
+const fixP = () => { ['rooms', 'doors', 'lay', 'mats', 'curt'].forEach(k => { if (!P[k] || typeof P[k] !== 'object') P[k] = {}; }); if (!Array.isArray(P.matsDel)) P.matsDel = []; if (!Array.isArray(P.furn)) P.furn = []; };
 fixP();
 const SY = { at: +(ls.get('remont-at') || 0), dirty: ls.get('remont-dirty') === '1', t: 0, busy: false, on: false, err: '' };
 if (!SY.at && (Object.keys(P.rooms).length || Object.keys(P.doors).length || Object.keys(P.lay).length)) SY.dirty = true;
@@ -95,7 +104,7 @@ const SURF = new Map();
 const WALL_KEYS = { top: 'w0', right: 'w1', bottom: 'w2', left: 'w3' };
 function surfacesOf(rid) {
   if (SURF.has(rid)) return SURF.get(rid);
-  const r = G.ROOMS.find(x => x.id === rid), [a, b, c, d] = r.rect, sw = (c - a) * K, sl = (d - b) * K;
+  const r = G.ROOMS.find(x => x.id === rid), [a, b, c, d] = r.rect, sw = MX(c) - MX(a), sl = MZ(d) - MZ(b);
   let W = sw, L = sl; const Wm = val(rid, 'W') ?? (BTI[rid] && BTI[rid].W), Lm = val(rid, 'L') ?? (BTI[rid] && BTI[rid].L);
   if (Wm && Lm) { if (Math.abs(Wm - sw) + Math.abs(Lm - sl) <= Math.abs(Lm - sw) + Math.abs(Wm - sl)) { W = Wm; L = Lm; } else { W = Lm; L = Wm; } }
   W = Math.round(W); L = Math.round(L);
@@ -117,8 +126,8 @@ function surfacesOf(rid) {
       const near = side === 'top' ? o.y1 >= b - T && o.y0 <= b + 3 : side === 'bottom' ? o.y0 <= d + T && o.y1 >= d - 3 : side === 'left' ? o.x1 >= a - T && o.x0 <= a + 3 : o.x0 <= c + T && o.x1 >= c - 3;
       const over = hor ? o.x1 > a + 2 && o.x0 < c - 2 : o.y1 > b + 2 && o.y0 < d - 2;
       if (!near || !over) return;
-      let u0 = side === 'top' ? (o.x0 - a) * K * kx : side === 'bottom' ? (c - o.x1) * K * kx : side === 'left' ? (d - o.y1) * K * ky : (o.y0 - b) * K * ky;
-      let u1 = side === 'top' ? (o.x1 - a) * K * kx : side === 'bottom' ? (c - o.x0) * K * kx : side === 'left' ? (d - o.y0) * K * ky : (o.y1 - b) * K * ky;
+      let u0 = side === 'top' ? (MX(o.x0) - MX(a)) * kx : side === 'bottom' ? (MX(c) - MX(o.x1)) * kx : side === 'left' ? (MZ(d) - MZ(o.y1)) * ky : (MZ(o.y0) - MZ(b)) * ky;
+      let u1 = side === 'top' ? (MX(o.x1) - MX(a)) * kx : side === 'bottom' ? (MX(c) - MX(o.x0)) * kx : side === 'left' ? (MZ(d) - MZ(o.y0)) * ky : (MZ(o.y1) - MZ(b)) * ky;
       if (o.wm) { const m = (u0 + u1) / 2; u0 = m - o.wm / 2; u1 = m + o.wm / 2; }
       u0 = Math.max(0, Math.round(u0)); u1 = Math.min(len, Math.round(u1));
       if (u1 - u0 > 50) holes.push({ x0: u0, x1: u1, y0: Hc - o.f1, y1: Hc - o.f0, kind: o.kind });
@@ -136,7 +145,7 @@ function wallUVShift(rid, fi) {
   return { uj, vj: (S.H - mk.my) / 1000, rot: !!lo.rot };
 }
 function doorCfg(key) { return Object.assign({ type: key === 'hall.d1_W' ? 'entry' : 'std', color: key === 'hall.d1_W' ? '#3a3330' : '#f4f2ee' }, P.doors[key] || {}); }
-function roomAt(x, z) { const px = x * 1000 / K + CX, py = z * 1000 / K + CY; const r = G.ROOMS.find(r => px >= r.rect[0] - 1 && px <= r.rect[2] + 1 && py >= r.rect[1] - 1 && py <= r.rect[3] + 1); return r ? r.id : null; }
+function roomAt(x, z) { const px = IX(x * 1000 + MX(CX)), py = IZ(z * 1000 + MZ(CY)); const r = G.ROOMS.find(r => px >= r.rect[0] - 1 && px <= r.rect[2] + 1 && py >= r.rect[1] - 1 && py <= r.rect[3] + 1); return r ? r.id : null; }
 function worldUV(geo, cx, cy, cz) {   // UV в метрах по мировым координатам: рисунок непрерывен между соседними кусками стены
   const p = geo.attributes.position, n = geo.attributes.normal, uv = geo.attributes.uv;
   for (let i = 0; i < p.count; i++) {
@@ -195,16 +204,50 @@ function doorLeaf(d, b, rid, dh, top) {
   if (cfg.type === 'hidden') {
     const am = (a1 + a2) / 2, s1 = hor ? roomAt(am, c1 - 0.06) : roomAt(c1 - 0.06, am);
     const front = s1 === rid ? c1 : c2, dir = front === c1 ? 1 : -1, wm = wallMatOf(rid);
-    B(a1 + 0.003, Math.min(front, front + dir * 0.04), a2 - 0.003, Math.max(front, front + dir * 0.04), 0.006, dh - 0.003, wm);
+    const hl = B(a1 + 0.003, Math.min(front, front + dir * 0.04), a2 - 0.003, Math.max(front, front + dir * 0.04), 0.006, dh - 0.003, wm);
+    doorPivot(hor, a1, front, [hl], front === c1 ? -1 : 1);
     [[a1, a1 + 0.003], [a2 - 0.003, a2]].forEach(([p, q]) => B(p, Math.min(front, front + dir * 0.03), q, Math.max(front, front + dir * 0.03), 0, dh, matGap, false));
     B(a1, Math.min(front, front + dir * 0.03), a2, Math.max(front, front + dir * 0.03), dh - 0.003, dh, matGap, false);
     return;
   }
   const leafM = matFor('paint', cfg.color), fw = 0.03, cw = 0.07, ct = 0.012;
   B(a1, c1, a1 + fw, c2, 0, dh, leafM); B(a2 - fw, c1, a2, c2, 0, dh, leafM); B(a1, c1, a2, c2, dh - fw, dh, leafM);
-  B(a1 + fw + 0.003, mid - 0.02, a2 - fw - 0.003, mid + 0.02, 0.01, dh - fw - 0.003, leafM);
+  const lf = B(a1 + fw + 0.003, mid - 0.02, a2 - fw - 0.003, mid + 0.02, 0.01, dh - fw - 0.003, leafM);
   [[c1 - ct, c1], [c2, c2 + ct]].forEach(([q1, q2]) => { B(a1 - cw, q1, a1, q2, 0, dh + cw, leafM); B(a2, q1, a2 + cw, q2, 0, dh + cw, leafM); B(a1 - cw, q1, a2 + cw, q2, dh, dh + cw, leafM); });
-  B(a2 - fw - 0.17, mid - 0.045, a2 - fw - 0.05, mid + 0.045, 0.99, 1.02, matHandle);
+  const hd = B(a2 - fw - 0.17, mid - 0.045, a2 - fw - 0.05, mid + 0.045, 0.99, 1.02, matHandle);
+  const am = (a1 + a2) / 2; doorPivot(hor, a1 + fw, mid, [lf, hd], (hor ? roomAt(am, c1 - 0.06) : roomAt(c1 - 0.06, am)) === rid ? -1 : 1);
+}
+/* подвижные части здания: створки окон, полотна дверей, шторы (нажатие — открыть/закрыть) */
+function pivotAt(x, z, meshes, to) { const p = new THREE.Group(); p.position.set(x, 0, z); world.add(p); meshes.filter(Boolean).forEach(m => p.attach(m)); p.userData.act = { kind: 'rot', axis: 'y', to, t: 0, target: 0 }; return p; }
+function doorPivot(hor, hinge, c, meshes, inS) { const to = (hor ? (inS < 0 ? 1 : -1) : (inS > 0 ? 1 : -1)) * 1.45; return hor ? pivotAt(hinge, c, meshes, to) : pivotAt(c, hinge, meshes, to); }
+function winSash(hor, a1, a2, c, y1, y2, inS) {
+  if (a2 - a1 < 0.2 || y2 - y1 < 0.2) return;
+  const B = (p1, q1, p2, q2, ya, yb, mat, sh) => hor ? box(p1, q1, p2, q2, ya, yb, mat, sh) : box(q1, p1, q2, p2, ya, yb, mat, sh);
+  const n = a2 - a1 > 1.3 ? 2 : 1, w = (a2 - a1) / n, f = 0.045;
+  for (let i = 0; i < n; i++) {
+    const s1 = a1 + i * w, s2 = s1 + w, low = i === 0, hinge = low ? s1 : s2, ym = (y1 + y2) / 2;
+    const ms = [B(s1 + f, c - 0.004, s2 - f, c + 0.004, y1 + f, y2 - f, matGlass, false), B(s1, c - 0.025, s1 + f, c + 0.025, y1, y2, matFrame), B(s2 - f, c - 0.025, s2, c + 0.025, y1, y2, matFrame), B(s1 + f, c - 0.025, s2 - f, c + 0.025, y1, y1 + f, matFrame), B(s1 + f, c - 0.025, s2 - f, c + 0.025, y2 - f, y2, matFrame),
+      B(low ? s2 - f + 0.01 : s1 + 0.01, c + inS * 0.025, low ? s2 - 0.01 : s1 + f - 0.01, c + inS * 0.06, ym - 0.06, ym + 0.06, matHandle)];
+    const to = (hor ? (low ? (inS < 0 ? 1 : -1) : (inS > 0 ? 1 : -1)) : (low ? (inS > 0 ? 1 : -1) : (inS < 0 ? 1 : -1))) * 1.25;
+    hor ? pivotAt(hinge, c, ms, to) : pivotAt(c, hinge, ms, to);
+  }
+}
+const matCurt = new THREE.MeshStandardMaterial({ color: '#cfc6b8', roughness: 1, side: THREE.DoubleSide, envMapIntensity: 0.2 });
+const matTulle = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1, side: THREE.DoubleSide, transparent: true, opacity: 0.42, depthWrite: false });
+function curtain(hor, a1, a2, c, S, T, style, inS) {
+  const root = new THREE.Group(); root.position.set(hor ? 0 : c, 0, hor ? c : 0); if (!hor) root.rotation.y = -Math.PI / 2; world.add(root);
+  const zin = hor ? inS : -inS;
+  const panel = (x0, x1, yT, yB, mat, anchor, to, open, z, axis = 'x') => {
+    const w = x1 - x0, h = yT - yB, g = new THREE.PlaneGeometry(w, h, axis === 'x' ? 36 : 1, 1), ps = g.attributes.position;
+    for (let i = 0; i < ps.count; i++) { const x = ps.getX(i) + w / 2; ps.setXYZ(i, anchor === 'r' ? x - w : x, ps.getY(i) - h / 2, axis === 'x' ? 0.03 * Math.sin(x * 34) : 0); }
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, mat), p = new THREE.Group(); p.position.set(anchor === 'r' ? x1 : x0, yT, z); p.add(m); root.add(p); m.castShadow = mat === matCurt; m.receiveShadow = true;
+    p.userData.act = { kind: 'scale', axis, to, t: 0, target: 0 }; setAct(p, open ? 1 : 0);
+  };
+  const mid = (a1 + a2) / 2, e = 0.22;
+  if (style === 'blind') return panel(a1 + 0.02, a2 - 0.02, T + 0.04, S - 0.03, matCurt, 'l', 0.06, true, zin * 0.02, 'y');
+  if (style === 'tulle' || style === 'both') panel(a1 - e, a2 + e, H - 0.03, 0.02, matTulle, 'l', 0.16, false, 0);
+  if (style === 'curt' || style === 'both') { panel(a1 - e, mid, H - 0.03, 0.02, matCurt, 'l', 0.3, true, zin * 0.06); panel(mid, a2 + e, H - 0.03, 0.02, matCurt, 'r', 0.3, true, zin * 0.06); }
 }
 function build() {
   SURF.clear(); world.clear(); wallMeshes.length = 0; ceilings.length = 0; labels.length = 0; solids.length = 0;
@@ -243,10 +286,12 @@ function build() {
     solids.push([x1, z1, x2, z2]);
     const hor = Math.abs(x2 - x1) > Math.abs(z2 - z1);
     const cx = (x1 + x2) / 2, cz = (z1 + z2) / 2, t = 0.06;
+    const inS = hor ? (roomAt(cx, cz + 0.45) === rid ? 1 : -1) : (roomAt(cx + 0.45, cz) === rid ? 1 : -1), cst = P.curt[rid];
+    if (cst && cst !== 'none' && !WALL_LOW && !bal) curtain(hor, hor ? x1 : z1, hor ? x2 : z2, (hor ? (inS > 0 ? Math.max(z1, z2) : Math.min(z1, z2)) : (inS > 0 ? Math.max(x1, x2) : Math.min(x1, x2))) + inS * 0.07, S, T, cst, inS);
     if (S < top) {
       const gy1 = S, gy2 = Math.min(T, top);
-      if (hor) { box(x1, cz - 0.004, x2, cz + 0.004, gy1, gy2, matGlass, false); [[x1, x1 + t], [x2 - t, x2]].forEach(([a, b]) => box(a, cz - 0.035, b, cz + 0.035, gy1, gy2, matFrame)); box(x1, cz - 0.035, x2, cz + 0.035, gy1, gy1 + t, matFrame); if (gy2 === T) box(x1, cz - 0.035, x2, cz + 0.035, T - t, T, matFrame); if (!bal) box(x1 - 0.03, Math.min(z1, z2) - 0.05, x2 + 0.03, cz, S, S + 0.025, matSill); }
-      else { box(cx - 0.004, z1, cx + 0.004, z2, gy1, gy2, matGlass, false); [[z1, z1 + t], [z2 - t, z2]].forEach(([a, b]) => box(cx - 0.035, a, cx + 0.035, b, gy1, gy2, matFrame)); box(cx - 0.035, z1, cx + 0.035, z2, gy1, gy1 + t, matFrame); }
+      if (hor) { winSash(true, x1 + t, x2 - t, cz, gy1 + t, gy2 === T ? T - t : gy2, inS); [[x1, x1 + t], [x2 - t, x2]].forEach(([a, b]) => box(a, cz - 0.035, b, cz + 0.035, gy1, gy2, matFrame)); box(x1, cz - 0.035, x2, cz + 0.035, gy1, gy1 + t, matFrame); if (gy2 === T) box(x1, cz - 0.035, x2, cz + 0.035, T - t, T, matFrame); if (!bal) box(x1 - 0.03, Math.min(z1, z2) - 0.05, x2 + 0.03, cz, S, S + 0.025, matSill); }
+      else { winSash(false, z1 + t, z2 - t, cx, gy1 + t, gy2 - (gy2 === T ? 0 : 0), inS); [[z1, z1 + t], [z2 - t, z2]].forEach(([a, b]) => box(cx - 0.035, a, cx + 0.035, b, gy1, gy2, matFrame)); box(cx - 0.035, z1, cx + 0.035, z2, gy1, gy1 + t, matFrame); }
     }
   });
   // двери: проём и перемычка над ним (полотна — на шаге 2)
@@ -260,6 +305,7 @@ function build() {
   // торцы срезанных стен — чуть темнее, чтобы читался план
   ceilings.forEach(c => { c.visible = MODE === 'walk'; });
   labels.forEach(l => { l.visible = MODE === 'orbit' && SHOW_LABELS; });
+  buildFurn();
   updateInfo();
 }
 
@@ -295,6 +341,7 @@ function setMode(m) {
     const wh = $('#whint'); wh.classList.remove('off'); clearTimeout(setMode.t); setMode.t = setTimeout(() => wh.classList.add('off'), 10000);
   } else { camera.fov = 45; camera.updateProjectionMatrix(); build(); homeView(false); }
   document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+  walk.sit = false; walk.eye = 1.6; walk.eyeNow = 1.6; markSel();
 }
 function blocked(x, z) {
   const r = 0.22;
@@ -303,11 +350,12 @@ function blocked(x, z) {
 // управление прогулкой: тянуть мышью — осмотреться; WASD/стрелки — идти; колесо — вперёд/назад
 let drag = null;
 canvas.addEventListener('pointerdown', e => { foldInfo(); if (MODE !== 'walk') return; $('#whint').classList.add('off'); drag = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t: performance.now() }; walk.goal = null; canvas.setPointerCapture(e.pointerId); });
-canvas.addEventListener('pointermove', e => { if (!drag) return; walk.yaw -= (e.clientX - drag.x) * 0.0045; walk.pitch = Math.max(-1.2, Math.min(1.2, walk.pitch - (e.clientY - drag.y) * 0.0045)); drag = { x: e.clientX, y: e.clientY }; });
+canvas.addEventListener('pointermove', e => { if (!drag) return; walk.yaw -= (e.clientX - drag.x) * 0.0045; walk.pitch = Math.max(-1.2, Math.min(1.2, walk.pitch - (e.clientY - drag.y) * 0.0045)); drag.x = e.clientX; drag.y = e.clientY; });
 canvas.addEventListener('pointerup', e => {
   if (drag && MODE === 'walk' && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 8 && performance.now() - drag.t < 350) {   // короткое касание пола — идти туда
-    const rc = new THREE.Raycaster(), v = new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); rc.setFromCamera(v, camera);
-    const hit = rc.intersectObjects(world.children, false).filter(h => h.object.visible && !h.object.isSprite)[0];
+    const hit = pick(e, [world, furnG]), pa = hit && findAct(hit.object), fg = hit && fidOf(hit.object);
+    if (pa) { toggle(pa); drag = null; return; }
+    if (fg && fg.userData.def.seat) { sitOn(fg); drag = null; return; }
     if (hit) {   // пол — идти в эту точку; стена или окно — подойти к ней
       const g = new THREE.Vector3(hit.point.x, 0, hit.point.z);
       if (!(hit.point.y < 0.05)) { const dx = g.x - walk.pos.x, dz = g.z - walk.pos.z, d = Math.hypot(dx, dz) || 1, back = Math.min(0.5, d); g.x -= dx / d * back; g.z -= dz / d * back; }
@@ -335,6 +383,113 @@ function step(fw, sd) {
   if (!blocked(walk.pos.x, nz)) walk.pos.z = nz;
 }
 
+/* ---------- мебель: расстановка, выбор, открывание ---------- */
+const furnG = new THREE.Group(); scene.add(furnG);
+const selBox = new THREE.BoxHelper(furnG, 0xd2452f); selBox.visible = false; scene.add(selBox);
+let FSEL = null, FCAT = 'living', SNAP = true;
+const furnRec = id => P.furn.find(f => f.id === id);
+const furnObj = id => furnG.children.find(g => g.userData.fid === id);
+function roomBox(rid) { const r = G.ROOMS.find(q => q.id === rid); if (!r) return null; const [a, b, c, d] = r.rect; return { x1: X(a), z1: Z(b), x2: X(c), z2: Z(d), h: (ceilOf(rid) || H * 1000) / 1000 }; }
+function furnMesh(rec) { const rb = roomBox(rec.room), g = makeItem(rec, rb ? rb.h : H); g.position.set(rec.x, 0, rec.z); g.rotation.y = rec.r || 0; g.userData.fid = rec.id; return g; }
+function buildFurn() { furnG.clear(); P.furn.forEach(rec => { if (defOf(rec.t)) furnG.add(furnMesh(rec)); }); markSel(); }
+function refreshFurn(rec) { const old = furnObj(rec.id); if (old) furnG.remove(old); furnG.add(furnMesh(rec)); markSel(); }
+function markSel() { const g = FSEL && furnObj(FSEL); if (g && MODE === 'orbit' && !PHOTO.on) { selBox.setFromObject(g); selBox.visible = true; } else selBox.visible = false; }
+function selectFurn(id) { FSEL = id; const rec = id && furnRec(id); if (rec) { SEL = rec.room || SEL || 'hall'; $('#info').dataset.tab = 'furn'; renderChips(); } markSel(); updateInfo(); }
+function placeAt(rec, x, z, snap) {
+  const d = defOf(rec.t), W = rec.w / 1000, D = rec.d / 1000, rid = roomAt(x, z), rb = rid && roomBox(rid); if (rid) rec.room = rid;
+  if (rb && snap && SNAP && !d.flat && !d.ceil) {
+    const ds = [[z - rb.z1, 0], [rb.x2 - x, -Math.PI / 2], [rb.z2 - z, Math.PI], [x - rb.x1, Math.PI / 2]]; let bi = 0; ds.forEach((q, i) => { if (q[0] < ds[bi][0]) bi = i; });
+    if (ds[bi][0] < D / 2 + 0.3) {   // рядом со стеной — встать к ней спинкой
+      rec.r = ds[bi][1];
+      if (bi === 0) z = rb.z1 + D / 2; else if (bi === 2) z = rb.z2 - D / 2; else if (bi === 1) x = rb.x2 - D / 2; else x = rb.x1 + D / 2;
+      if (bi % 2 === 0) x = Math.max(rb.x1 + W / 2, Math.min(rb.x2 - W / 2, x)); else z = Math.max(rb.z1 + W / 2, Math.min(rb.z2 - W / 2, z));
+    } else { const q = Math.abs(Math.sin(rec.r || 0)) > 0.7, hw = (q ? D : W) / 2, hd = (q ? W : D) / 2; x = Math.max(rb.x1 + hw, Math.min(rb.x2 - hw, x)); z = Math.max(rb.z1 + hd, Math.min(rb.z2 - hd, z)); }
+  }
+  rec.x = +x.toFixed(3); rec.z = +z.toFixed(3);
+}
+function furnPanel(r) {
+  const rec = FSEL && furnRec(FSEL);
+  if (rec) {
+    const d = defOf(rec.t);
+    return '<div class="fhead"><button type="button" class="btn ghost" data-fact="back">← Каталог</button><b>' + esc(d.name) + '</b></div>' +
+      '<div class="f3">' + [['w', 'Ширина'], ['d', 'Глубина'], ['h', 'Высота']].map(([k, l]) => '<label class="f"><span>' + l + ', мм</span><input type="number" inputmode="numeric" data-fdim="' + k + '" value="' + rec[k] + '"></label>').join('') + '</div>' +
+      (d.wall || rec.y ? '<label class="f"><span>Низ от пола, мм</span><input type="number" inputmode="numeric" data-fdim="y" value="' + (rec.y || 0) + '"></label>' : '') +
+      '<p class="sub">Отделка</p><div class="pal">' + FIN.map(f => '<button type="button" class="pc' + (f.id === rec.f ? ' on' : '') + '" style="background:' + f.c + '" data-ffin="' + f.id + '" title="' + f.name + '"></button>').join('') + '</div>' +
+      '<div class="fbtns">' + [['rl', '↺ 90°'], ['rr', '↻ 90°'], ['r15', '↻ 15°'], ['open', 'Открыть всё'], ['snap', 'Магнит к стенам: ' + (SNAP ? 'вкл' : 'выкл')], ['dup', 'Дублировать'], ['del', 'Удалить']].map(([k, l]) => '<button type="button" class="btn ghost" data-fact="' + k + '">' + l + '</button>').join('') + '</div>' +
+      '<p class="muted">Тяните предмет по полу — у стены он сам встанет к ней спинкой. Нажмите на дверцу или ящик, чтобы открыть.</p>';
+  }
+  const wins = G.WINDOWS.some(q => q[4].split('.')[0] === r.id && r.id !== 'bal'), cs = P.curt[r.id] || 'none';
+  return '<div class="fcats">' + CATS.map(([k, l]) => '<button type="button" class="chip" data-fcat="' + k + '" aria-pressed="' + (FCAT === k) + '">' + l + '</button>').join('') + '</div>' +
+    '<div class="sw">' + CATALOG.filter(d => d.cat === FCAT).map(d => '<button type="button" class="swb fit" data-addf="' + d.id + '" title="' + esc(d.name) + '"><img alt="" src="' + thumb(d, renderer) + '"><span>' + esc(d.name) + '<br><small>' + d.w + '×' + d.d + '×' + d.h + '</small></span></button>').join('') + '</div>' +
+    (wins ? '<p class="sub">Шторы на окнах</p><div class="seg2 wrap">' + [['none', 'Нет'], ['tulle', 'Тюль'], ['curt', 'Шторы'], ['both', 'Тюль и шторы'], ['blind', 'Рулонные']].map(([k, l]) => '<button type="button" data-curt="' + k + '" aria-pressed="' + (cs === k) + '">' + l + '</button>').join('') + '</div>' : '') +
+    '<p class="muted">Предметов в комнате: ' + P.furn.filter(f => f.room === r.id).length + '. Нажмите на предмет в 3D, чтобы поменять размер и отделку. Двери, окна и шторы тоже открываются нажатием.</p>';
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-fcat],[data-addf],[data-fact],[data-ffin],[data-curt]'); if (!b) return;
+  if (b.dataset.fcat) { FCAT = b.dataset.fcat; updateInfo(); return; }
+  if (b.dataset.curt && SEL) { P.curt[SEL] = b.dataset.curt; saveP(); build(); return; }
+  if (b.dataset.addf && SEL) { const d = defOf(b.dataset.addf), c = roomCenter(G.ROOMS.find(x => x.id === SEL)), rec = Object.assign(recOf(d), { id: 'f' + Date.now().toString(36), room: SEL, r: 0, x: c.x, z: c.z });
+    P.furn.push(rec); placeAt(rec, c.x, c.z, false); furnG.add(furnMesh(rec)); saveP(); if (MOB.matches) INFO_OPEN = false; selectFurn(rec.id); return; }
+  const rec = FSEL && furnRec(FSEL); if (!rec) return;
+  if (b.dataset.ffin) rec.f = b.dataset.ffin;
+  else { const a = b.dataset.fact;
+    if (a === 'back') { selectFurn(null); return; }
+    if (a === 'snap') { SNAP = !SNAP; updateInfo(); return; }
+    if (a === 'open') { const g = furnObj(rec.id), as = allActs(g), any = as.some(o => o.userData.act.target > 0.5); as.forEach(o => toggle(o, any ? 0 : 1)); return; }
+    if (a === 'del') { P.furn = P.furn.filter(f => f.id !== rec.id); saveP(); buildFurn(); selectFurn(null); return; }
+    if (a === 'dup') { const n = Object.assign({}, rec, { id: 'f' + Date.now().toString(36) }); P.furn.push(n); placeAt(n, rec.x + 0.4, rec.z + 0.4, false); furnG.add(furnMesh(n)); saveP(); selectFurn(n.id); return; }
+    rec.r = (rec.r || 0) + (a === 'rl' ? Math.PI / 2 : a === 'rr' ? -Math.PI / 2 : -Math.PI / 12);
+  }
+  refreshFurn(rec); saveP(); updateInfo();
+});
+document.addEventListener('change', e => {
+  const t = e.target, k = t.dataset && t.dataset.fdim, rec = k && FSEL && furnRec(FSEL); if (!rec) return;
+  const v = Math.round(+t.value); if (!isFinite(v)) return; rec[k] = k === 'y' ? Math.max(0, Math.min(2600, v)) : Math.max(k === 'h' ? 10 : 100, Math.min(6000, v));
+  refreshFurn(rec); saveP();
+});
+const rayc = new THREE.Raycaster(), floorPl = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const ndc = e => new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+function pick(e, roots) { scene.updateMatrixWorld(); camera.updateMatrixWorld(); rayc.setFromCamera(ndc(e), camera); return rayc.intersectObjects(roots, true).filter(h => { if (h.object.isSprite || h.object.isLine) return false; for (let o = h.object; o; o = o.parent) if (!o.visible) return false; return true; })[0]; }
+const fidOf = obj => { for (let o = obj; o; o = o.parent) if (o.userData && o.userData.fid) return o; return null; };
+function sitOn(g) { const d = g.userData.def, top = d.id === 'barst' ? 0.78 : /^bed|kbed/.test(d.id) ? 0.52 : 0.45; walk.pos.set(g.position.x, 0, g.position.z); walk.eye = top + 0.68; walk.yaw = g.rotation.y + Math.PI; walk.pitch = -0.05; walk.goal = null; walk.sit = true; }
+let fdrag = null;
+canvas.addEventListener('pointerdown', e => {
+  if (MODE !== 'orbit' || PHOTO.on) return;
+  const hit = pick(e, [furnG]), g = hit && fidOf(hit.object);
+  fdrag = { x: e.clientX, y: e.clientY, moved: false, g, hit };
+  if (g) { controls.enabled = false; const p = new THREE.Vector3(); fdrag.off = rayc.ray.intersectPlane(floorPl, p) ? p.sub(g.position).setY(0) : new THREE.Vector3(); if (FSEL !== g.userData.fid) selectFurn(g.userData.fid); }
+}, true);
+canvas.addEventListener('pointermove', e => {
+  if (!fdrag) return; if (!fdrag.moved && Math.hypot(e.clientX - fdrag.x, e.clientY - fdrag.y) < 6) return; fdrag.moved = true;
+  if (!fdrag.g) return;
+  rayc.setFromCamera(ndc(e), camera); const p = new THREE.Vector3(); if (!rayc.ray.intersectPlane(floorPl, p)) return;
+  const rec = furnRec(fdrag.g.userData.fid); placeAt(rec, p.x - fdrag.off.x, p.z - fdrag.off.z, true);
+  fdrag.g.position.x = rec.x; fdrag.g.position.z = rec.z; fdrag.g.rotation.y = rec.r || 0; markSel();
+});
+const endFDrag = e => {
+  const d = fdrag; fdrag = null; if (!d) return; if (MODE === 'orbit') controls.enabled = true;
+  if (d.g && d.moved) { saveP(); if (SEL !== furnRec(d.g.userData.fid).room) selectFurn(d.g.userData.fid); return; }
+  if (d.moved || MODE !== 'orbit') return;
+  const h = d.g ? d.hit : pick(e, [world]), a = h && findAct(h.object);
+  if (a) toggle(a); else if (!d.g && FSEL) selectFurn(null);
+};
+canvas.addEventListener('pointerup', endFDrag); canvas.addEventListener('pointercancel', () => { fdrag = null; if (MODE === 'orbit') controls.enabled = true; });
+
+/* ---------- фото-рендер ---------- */
+const PHOTO = { on: false, cancel: null };
+function startPhoto() {
+  if (PHOTO.on) return;
+  if (fly) { camera.position.copy(fly.p1); controls.target.copy(fly.q1); fly = null; controls.update(); }
+  PHOTO.on = true; document.body.classList.add('photo'); markSel(); labels.forEach(l => { l.visible = false; }); document.body.classList.remove('hdr-open');
+  const inside = MODE === 'walk', rid = inside ? roomAt(walk.pos.x, walk.pos.z) : null, el = $('#photo'); el.hidden = false; el.dataset.done = '0';
+  $('#photoT').textContent = 'Фото-рендер: 0%';
+  renderer.render(scene, camera);
+  PHOTO.cancel = renderPhoto({ renderer, scene, camera, sun, hemi, samples: window.__photoN || (MOB.matches ? 72 : 160), inside, room: rid && roomBox(rid), matte: [matGlass],
+    onProgress: (i, n) => { $('#photoT').textContent = 'Фото-рендер: ' + Math.round(i / n * 100) + '%'; },
+    onDone: ok => { PHOTO.cancel = null; if (ok) { $('#photoT').textContent = 'Фото готово'; el.dataset.done = '1'; } } });
+}
+function stopPhoto() { if (PHOTO.cancel) PHOTO.cancel(); PHOTO.on = false; document.body.classList.remove('photo'); $('#photo').hidden = true; labels.forEach(l => { l.visible = MODE === 'orbit' && SHOW_LABELS; }); markSel(); }
+
 /* ---------- интерфейс ---------- */
 function renderChips() {
   $('#rooms').innerHTML = G.ROOMS.map(r => '<button type="button" class="chip" data-room="' + r.id + '" aria-pressed="' + (SEL === r.id) + '">' + esc(r.short) + '</button>').join('');
@@ -357,7 +512,7 @@ function updateInfo() {
   const r = G.ROOMS.find(x => x.id === SEL);
   if (!r) { $('#info').hidden = true; return; }
   const W = val(r.id, 'W'), L = val(r.id, 'L'), c = ceilOf(r.id), f = fin(r.id);
-  const [a, b, cc, d] = r.rect, sw = (cc - a) * K, sl = (d - b) * K;
+  const [a, b, cc, d] = r.rect, sw = MX(cc) - MX(a), sl = MZ(d) - MZ(b);
   const wm = MATS.get(f.walls) || MATS.get('paint'), fm = MATS.get(f.floor) || MATS.get('lam-nat');
   const doors = G.DOORS.filter(dd => doorSides(dd).includes(r.id) || dd[4].split('.')[0] === r.id);
   const tab = $('#info').dataset.tab || 'floor';
@@ -370,13 +525,14 @@ function updateInfo() {
     '<div class="kv"><span>Площадь по БТИ</span><b>' + (BTI_AREA[r.id] ?? r.proj).toLocaleString('ru-RU', { minimumFractionDigits: 1 }) + ' м²</b></div>' +
     '<div class="kv"><span>Потолок</span><b>' + (c ? fmt(c) + ' мм (замер)' : fmt(H * 1000) + ' мм' + (ceilAll() ? ' (среднее по замерам)' : ' (БТИ)')) + '</b></div>' +
     (() => { const ms = missing(r.id); return ms.length ? '<div class="need"><b>Не хватает замеров: ' + ms.length + '</b><span>' + esc(ms.slice(0, 4).join(', ')) + (ms.length > 4 ? '…' : '') + '</span><button type="button" class="btn ghost" data-measure="' + r.id + '">Замерить в «Обмере» →</button></div>' : '<div class="need ok"><b>Замеры комнаты полные</b><button type="button" class="btn ghost" data-measure="' + r.id + '">Открыть в «Обмере»</button></div>'; })() +
-    '<div class="tabs" role="group">' + [['floor', 'Пол'], ['walls', 'Стены'], ['ceil', 'Потолок'], ['doors', 'Двери']].map(([k, l]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k) + '">' + l + '</button>').join('') + '</div>' +
+    '<div class="tabs" role="group">' + [['floor', 'Пол'], ['walls', 'Стены'], ['ceil', 'Потолок'], ['doors', 'Двери'], ['furn', 'Мебель']].map(([k, l]) => '<button type="button" data-tab="' + k + '" aria-pressed="' + (tab === k) + '">' + l + '</button>').join('') + '</div>' +
     (tab === 'floor' ? '<button type="button" class="btn lay" data-lay="floor">Раскладка и расчёт пола →</button><p class="cur">' + esc(fm.name) + '</p>' + grid('floor', f.floor, f.floorColor) + (fm.colorable ? '<p class="sub">Цвет</p>' + colors('floorc', f.floorColor) : '') : '') +
     (tab === 'walls' ? '<button type="button" class="btn lay" data-lay="walls">Раскладка и расчёт стен →</button><p class="cur">' + esc(wm.name) + (wm.colorable ? ' · <span class="dot" style="background:' + f.wallColor + '"></span>' + f.wallColor : '') + '</p>' + grid('walls', f.walls, f.wallColor) + (wm.colorable ? '<p class="sub">Цвет</p>' + colors('walls', f.wallColor) : '') : '') +
     (tab === 'ceil' ? '<p class="sub">Цвет потолка</p>' + colors('ceil', f.ceil) + '<p class="muted">Потолок виден в режиме «Прогулка».</p>' : '') +
     (tab === 'doors' ? (doors.length ? doors.map(dd => { const cf = doorCfg(dd[4]), sd = doorSides(dd).filter(Boolean); return '<div class="door"><b>' + esc(sd.length === 2 ? roomName(sd[0]) + ' ↔ ' + roomName(sd[1]) : dd[4] === 'hall.d1_W' ? 'Входная дверь' : 'Дверь ' + roomName(sd[0])) + '</b>' +
       '<div class="seg2">' + DOOR_TYPES.map(([k, l]) => '<button type="button" data-door="' + dd[4] + '" data-dtype="' + k + '" aria-pressed="' + (cf.type === k) + '">' + l + '</button>').join('') + '</div>' +
-      (cf.type === 'std' || cf.type === 'entry' ? '<div class="pal">' + DOOR_COLORS.map(([c, l]) => '<button type="button" class="pc' + (c === cf.color ? ' on' : '') + '" style="background:' + c + '" data-door="' + dd[4] + '" data-dcolor="' + c + '" title="' + l + '"></button>').join('') + '</div>' : cf.type === 'hidden' ? '<p class="muted">Полотно заподлицо со стеной, в отделке комнаты «' + esc(roomName(dd[4].split('.')[0])) + '».</p>' : '') + '</div>'; }).join('') : '<p class="muted">В этой комнате нет дверных проёмов.</p>') : '');
+      (cf.type === 'std' || cf.type === 'entry' ? '<div class="pal">' + DOOR_COLORS.map(([c, l]) => '<button type="button" class="pc' + (c === cf.color ? ' on' : '') + '" style="background:' + c + '" data-door="' + dd[4] + '" data-dcolor="' + c + '" title="' + l + '"></button>').join('') + '</div>' : cf.type === 'hidden' ? '<p class="muted">Полотно заподлицо со стеной, в отделке комнаты «' + esc(roomName(dd[4].split('.')[0])) + '».</p>' : '') + '</div>'; }).join('') : '<p class="muted">В этой комнате нет дверных проёмов.</p>') : '') +
+    (tab === 'furn' ? furnPanel(r) : '');
 }
 document.addEventListener('click', e => {
   const del = e.target.closest('[data-delmat]');
@@ -399,7 +555,7 @@ document.addEventListener('click', e => {
     else if (f2.dataset.imp) { const kind = f2.dataset.imp, rid = SEL; openImporter({ cat: kind === 'floor' ? 'floor' : 'wall', onDone: id => { const RR = P.rooms[rid] = P.rooms[rid] || {}; RR[kind === 'floor' ? 'floor' : 'walls'] = id; saveP(); build(); syncMats(); } }); return; }
     saveP(); build(); return;
   }
-  const t = e.target.closest('[data-room],[data-mode],[data-act]'); if (!t) return;
+  const t = e.target.closest('[data-room],button[data-mode],[data-act]'); if (!t) return;   // у body тоже есть data-mode — берём только кнопки
   if (t.dataset.room) { const r = G.ROOMS.find(x => x.id === t.dataset.room); if (r) focusRoom(r); return; }
   if (t.dataset.mode) { setMode(t.dataset.mode); return; }
   const a = t.dataset.act;
@@ -408,6 +564,9 @@ document.addEventListener('click', e => {
   else if (a === 'labels') { SHOW_LABELS = !SHOW_LABELS; t.setAttribute('aria-pressed', String(SHOW_LABELS)); labels.forEach(l => { l.visible = MODE === 'orbit' && SHOW_LABELS; }); }
   else if (a === 'shot') { renderer.render(scene, camera); const u = canvas.toDataURL('image/png'); const l = document.createElement('a'); l.href = u; l.download = 'remont-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.png'; l.click(); }
   else if (a === 'unsel') { SEL = null; INFO_OPEN = false; renderChips(); updateInfo(); }
+  else if (a === 'photo') startPhoto();
+  else if (a === 'photosave') { const l = document.createElement('a'); l.href = canvas.toDataURL('image/png'); l.download = 'remont-foto-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.png'; l.click(); }
+  else if (a === 'photoclose') stopPhoto();
   else if (a === 'fold') { INFO_OPEN = !INFO_OPEN; updateInfo(); }
   else if (a === 'more') { const o = document.body.classList.toggle('hdr-open'); t.setAttribute('aria-expanded', String(o)); }
   else if (a === 'login') openLogin();
@@ -464,7 +623,8 @@ function pushSoon() { clearTimeout(SY.t); if (WEBTOK) SY.t = setTimeout(pushProj
 const isObj = x => x && typeof x === 'object' && !Array.isArray(x);
 function mergeDoc(base, mine) {   // сервер + мои несохранённые правки (мои важнее)
   const out = JSON.parse(JSON.stringify(base || {}));
-  ['rooms', 'doors', 'lay', 'mats'].forEach(k => { out[k] = Object.assign({}, isObj(out[k]) ? out[k] : {}, isObj(mine[k]) ? mine[k] : {}); });
+  ['rooms', 'doors', 'lay', 'mats', 'curt'].forEach(k => { out[k] = Object.assign({}, isObj(out[k]) ? out[k] : {}, isObj(mine[k]) ? mine[k] : {}); });
+  out.furn = Array.isArray(mine.furn) ? mine.furn : (out.furn || []);
   out.matsDel = [...new Set([...(out.matsDel || []), ...(mine.matsDel || [])])];
   out.matsDel.forEach(id => { delete out.mats[id]; });
   return out;
@@ -560,19 +720,23 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { sc
 const clock = new THREE.Clock();
 function tick() {
   const dt = Math.min(0.05, clock.getDelta());
+  if (PHOTO.on) { requestAnimationFrame(tick); return; }   // во время фото-рендера камера и сцена неподвижны
   if (fly) { fly.t = Math.min(1, fly.t + dt / 0.9); const e = 1 - Math.pow(1 - fly.t, 3); camera.position.lerpVectors(fly.p0, fly.p1, e); controls.target.lerpVectors(fly.q0, fly.q1, e); if (fly.t >= 1) fly = null; }
   if (MODE === 'walk') {
     const k = walk.keys, sp = (k.ShiftLeft || k.ShiftRight ? 2.6 : 1.4) * dt;
     const fw = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0), sd = (k.KeyD ? 1 : 0) - (k.KeyA ? 1 : 0);
     if (k.ArrowLeft) walk.yaw += 1.8 * dt; if (k.ArrowRight) walk.yaw -= 1.8 * dt;
+    if (walk.sit && (fw || sd || walk.goal || (walk.joy && (walk.joy.x || walk.joy.y)))) { walk.sit = false; walk.eye = 1.6; }
     if (fw || sd) step(fw * sp, sd * sp);
     const J = walk.joy; if (J && (J.x || J.y)) { const m = Math.min(1, Math.hypot(J.x, J.y)), s1 = 1.6 * dt * m; step(-J.y / (m || 1) * s1 * (Math.abs(J.y) > 0.15 ? 1 : 0), J.x / (m || 1) * s1 * 0.8 * (Math.abs(J.x) > 0.15 ? 1 : 0)); }
     if (walk.goal) { const dx = walk.goal.x - walk.pos.x, dz = walk.goal.z - walk.pos.z, d = Math.hypot(dx, dz); if (d < 0.08) walk.goal = null; else { const s2 = Math.min(d, 1.5 * dt), ox = walk.pos.x, oz = walk.pos.z, nx = ox + dx / d * s2, nz = oz + dz / d * s2; if (!blocked(nx, oz)) walk.pos.x = nx; if (!blocked(walk.pos.x, nz)) walk.pos.z = nz; if (walk.pos.x === ox && walk.pos.z === oz) walk.goal = null; } }
-    camera.position.set(walk.pos.x, walk.eye, walk.pos.z);
+    walk.eyeNow = (walk.eyeNow || walk.eye) + (walk.eye - (walk.eyeNow || walk.eye)) * Math.min(1, dt * 6);
+    camera.position.set(walk.pos.x, walk.eyeNow, walk.pos.z);
     const d = new THREE.Vector3(-Math.sin(walk.yaw) * Math.cos(walk.pitch), Math.sin(walk.pitch), -Math.cos(walk.yaw) * Math.cos(walk.pitch));
     camera.lookAt(camera.position.clone().add(d));
   } else controls.update();
-  if (!window.__pause) renderer.render(scene, camera);
+  stepActs(dt);
+  if (!window.__pause && !PHOTO.on) renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
 
@@ -582,4 +746,4 @@ loadLibrary().then(n => { if (n) build(); });
 loadServer().then(() => syncProject()); setSync();
 const deep = () => { const m = location.hash.match(/^#room=([a-z0-9_]+)/); const r = m && G.ROOMS.find(x => x.id === m[1]); if (r) focusRoom(r); };
 addEventListener('hashchange', deep); setTimeout(deep, 300);
-window.__app = { walk, scene, camera, setMode, focusRoom: id => focusRoom(G.ROOMS.find(r => r.id === id)), M, build, SY, getP: () => P };
+window.__app = { pick, fidOf, sitOn, furnG, PHOTO, placeAt, roomBox, recOf, defOf, toggle, allActs, saveP, selectFurn, world, walk, scene, camera, setMode, focusRoom: id => focusRoom(G.ROOMS.find(r => r.id === id)), M, build, SY, getP: () => P };

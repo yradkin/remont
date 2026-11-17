@@ -105,6 +105,7 @@ body[data-mode="orbit"] .walkonly,body[data-mode="walk"] .orbitonly{display:none
   body.hdr-open[data-mode="walk"] .top .orbitonly{display:none}
   #info{top:auto;bottom:78px;left:10px;right:10px;width:auto;max-height:58vh;padding:12px 14px}
   #info .fold{display:grid;place-items:center;appearance:none;border:0;background:var(--chip);color:var(--txt);width:28px;height:28px;border-radius:8px;font-size:14px;cursor:pointer;margin-left:auto;margin-right:6px}
+  #info[data-tab="furn"] .kv,#info[data-tab="furn"] .need{display:none}
   #info.folded{overflow:hidden;padding:10px 14px}
   #info.folded>:not(.ih){display:none}
   #info.folded .ih{margin:0}
@@ -112,6 +113,20 @@ body[data-mode="orbit"] .walkonly,body[data-mode="walk"] .orbitonly{display:none
   body[data-mode="walk"] #info{bottom:78px;z-index:6}
   #rooms{bottom:10px;max-width:calc(100% - 20px)}
 }
+
+/* мебель и фото-рендер */
+.f3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:8px 0}
+.fhead{display:flex;align-items:center;gap:10px;margin:4px 0 6px}.fhead .btn{padding:7px 10px;font-size:12.5px}
+.fbtns{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 4px}.fbtns .btn{padding:8px 10px;font-size:12.5px}
+.fcats{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:2px -4px 10px;padding:0 4px}.fcats .chip{padding:7px 11px;font-size:12.5px}
+.swb.fit img{object-fit:contain;background:rgba(128,128,128,.10)}.swb small{color:var(--txt2);font-weight:500}
+.seg2.wrap{flex-wrap:wrap}.seg2.wrap button{flex:1 0 30%}
+#photo{position:fixed;inset:0;z-index:30;cursor:progress}#photo[hidden]{display:none}
+#photo[data-done="1"]{cursor:default}
+body.photo .panel:not(.pbar),body.photo #joy{display:none!important}
+.pbar{left:50%;bottom:18px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:10px 12px;max-width:calc(100% - 20px)}
+.pbar b{padding:0 6px;white-space:nowrap}#photo:not([data-done="1"]) [data-act="photosave"]{display:none}
+.camonly{display:none}@media (pointer:coarse){.camonly{display:inline-block}}
 /* раскладка */
 .btn.lay{width:100%;margin:2px 0 10px;padding:10px 12px;font-size:13px}
 .mi.lay{max-width:1100px}
@@ -134,28 +149,30 @@ body[data-mode="orbit"] .walkonly,body[data-mode="walk"] .orbitonly{display:none
 @media (max-width:760px){.laytop{flex-wrap:wrap}.lres .big{grid-column:span 1}.impgrid{grid-template-columns:1fr}#info{width:auto}}
 @media (max-width:760px){#info{top:auto;bottom:80px;left:14px;right:14px;width:auto;max-height:56vh}#help{display:none}.brand small{display:none}}
 </style>
-<script type="importmap">{"imports":{"three":"./three.module.min.js","three/addons/controls/OrbitControls.js":"./OrbitControls.js","three/addons/environments/RoomEnvironment.js":"./RoomEnvironment.js","./mats.js":"./mats.js?v=20261117a","./lay.js":"./lay.js?v=20261117a","./laycalc.js":"./laycalc.js?v=20261117a"}}</script>
+<script type="importmap">{"imports":{"three":"./three.module.min.js","three/addons/controls/OrbitControls.js":"./OrbitControls.js","three/addons/environments/RoomEnvironment.js":"./RoomEnvironment.js","./mats.js":"./mats.js?v=20261117d","./lay.js":"./lay.js?v=20261117d","./laycalc.js":"./laycalc.js?v=20261117d","./furn.js":"./furn.js?v=20261117d","./photo.js":"./photo.js?v=20261117d"}}</script>
 </head>
 <body data-mode="orbit">
 <canvas id="c" tabindex="0"></canvas>
 <header class="panel top">
-  <div class="brand"><i><svg width="18" height="18" viewBox="0 0 24 24"><path d="M4 20V10l8-6 8 6v10" fill="none" stroke="#e9d3b0" stroke-width="2.2" stroke-linejoin="round"/></svg></i><div><b>Ремонт · Тип 13</b><small>Отделка: пол, стены, двери</small></div></div>
+  <div class="brand"><i><svg width="18" height="18" viewBox="0 0 24 24"><path d="M4 20V10l8-6 8 6v10" fill="none" stroke="#e9d3b0" stroke-width="2.2" stroke-linejoin="round"/></svg></i><div><b>Ремонт · Тип 13</b><small>Отделка, мебель, фото-рендер</small></div></div>
   <div class="seg" role="group" aria-label="Режим"><button type="button" data-mode="orbit" aria-pressed="true">3D-обзор</button><button type="button" data-mode="walk" aria-pressed="false">Прогулка</button></div>
   <button type="button" class="tb orbitonly" data-act="cut" aria-pressed="false" title="Срезать стены до 1,15 м, чтобы видеть план">Срез стен</button>
   <button type="button" class="tb orbitonly" data-act="labels" aria-pressed="true">Подписи</button>
   <button type="button" class="tb orbitonly" data-act="home">Вся квартира</button>
   <button type="button" class="tb" data-act="shot" title="Сохранить картинку">Снимок</button>
+  <button type="button" class="tb" data-act="photo" title="Качественная картинка с мягким светом и тенями">Фото-рендер</button>
   <button type="button" class="tb more" data-act="more" aria-label="Ещё" aria-expanded="false">⋯</button>
   <button type="button" class="src" id="src" data-act="login" data-ok="0">По БТИ</button>
   <button type="button" class="src" id="sync" data-act="login" data-ok="0" title="Где хранится ваш проект">Только в этом браузере</button>
 </header>
 <nav class="panel" id="rooms" aria-label="Комнаты"></nav>
 <aside class="panel" id="info" hidden></aside>
+<div id="photo" hidden><div class="panel pbar"><b id="photoT">Фото-рендер</b><button type="button" class="btn" data-act="photosave">Сохранить PNG</button><button type="button" class="btn ghost" data-act="photoclose">Закрыть</button></div></div>
 <div id="joy" class="walkonly" aria-hidden="true"><i></i></div>
-<div class="panel walkonly" id="whint">Джойстик — идти · тяните по экрану — осмотреться · коснитесь пола — перейти туда</div>
-<div class="panel" id="help"><span class="orbitonly"><b>Мышь:</b> левая — вращать, правая — сдвигать, колесо — приблизить. Нажмите комнату внизу.</span><span class="walkonly"><b>Прогулка:</b> W A S D или стрелки — идти, Shift — быстрее, тянуть мышью — осмотреться, колесо — шаг. Комната внизу — перейти в неё.</span></div>
+<div class="panel walkonly" id="whint">Джойстик — идти · тяните — осмотреться · коснитесь пола — перейти · двери, окна, ящики, шторы — открыть · диван или стул — сесть</div>
+<div class="panel" id="help"><span class="orbitonly"><b>Мышь:</b> левая — вращать, правая — сдвигать, колесо — приблизить. Нажмите комнату внизу. Мебель тянется мышью, двери и ящики открываются нажатием.</span><span class="walkonly"><b>Прогулка:</b> W A S D или стрелки — идти, Shift — быстрее, тянуть мышью — осмотреться, колесо — шаг. Комната внизу — перейти в неё. Нажмите на дверь, окно, штору или ящик — открыть, на диван или стул — сесть.</span></div>
 <script>window.__GEO={"K":7.114,"WALLS":[[1108,180,1136,780],[1136,180,1292,230],[1510,180,1617,230],[1585,230,1617,1637],[355,662,1195,690],[1322,662,1617,690],[397,690,430,750],[643,690,669,780],[1330,690,1347,800,1],[1330,900,1347,990,1],[1259,990,1585,1005,1],[669,914,776,932,1],[962,914,1108,932,1],[643,914,669,1800],[1108,914,1136,1590],[140,887,166,1800],[397,887,430,920],[166,920,472,946,1],[455,1038,472,1128,1],[166,1128,522,1144,1],[140,1590,279,1637],[478,1590,764,1637],[1017,1590,1271,1637],[1475,1590,1617,1637],[166,1637,215,1800]],"WINDOWS":[[279,1590,478,1637,"kit.w1_W"],[764,1590,1017,1637,"r14.w1_W"],[1271,1590,1475,1637,"r13.w1_W"],[1292,180,1510,230,"r10.w1_W"],[215,1792,643,1808,"bal.w1_W"]],"DOORS":[[1195,676,1322,676,"r10.d1_W"],[1338,800,1338,900,"bath.d1_W"],[1136,997,1259,997,"r13.d1_W"],[776,923,962,923,"r14.d1_W"],[463,946,463,1038,"wc.d1_W"],[522,1136,643,1136,"kit.d1_W"],[153,700,153,880,"hall.d1_W"]],"ROOMS":[{"id":"hall","short":"Прихожая","name":"Прихожая 12,97","proj":12.97,"rect":[166,690,1330,914]},{"id":"kit","short":"Кухня","name":"Кухня 10,97","proj":10.97,"rect":[166,1144,643,1590]},{"id":"bal","short":"Лоджия","name":"Лоджия 3,22","proj":3.22,"rect":[215,1637,643,1800]},{"id":"wc","short":"Санузел","name":"Санузел 1,71","proj":1.71,"rect":[166,946,455,1128]},{"id":"bath","short":"Ванная","name":"Ванная 3,04","proj":3.04,"rect":[1347,690,1585,990]},{"id":"r10","short":"Комн. 10,11","name":"Комната 10,11","proj":10.11,"rect":[1136,230,1585,662]},{"id":"r14","short":"Комн. 14,85","name":"Комната 14,85","proj":14.85,"rect":[669,932,1108,1590]},{"id":"r13","short":"Комн. 13,54","name":"Комната 13,54","proj":13.54,"rect":[1136,1005,1585,1590]}]};</script>
-<script src="./qrcode.js?v=20261117a"></script>
-<script type="module" src="./app.js?v=20261117a"></script>
+<script src="./qrcode.js?v=20261117d"></script>
+<script type="module" src="./app.js?v=20261117d"></script>
 </body>
 </html>
